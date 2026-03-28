@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Finanzas Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.10.4/umd/Recharts.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body{margin:0;background:#0f172a;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
+    *{box-sizing:border-box;}
+    ::-webkit-scrollbar{width:5px;height:5px;}
+    ::-webkit-scrollbar-track{background:#1e293b;}
+    ::-webkit-scrollbar-thumb{background:#475569;border-radius:3px;}
+    select option{background:#1e293b;color:#f1f5f9;}
+    select{cursor:pointer;}
+    .tbl-row:hover{background:rgba(255,255,255,0.04);}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+var useState=window.React.useState,useEffect=window.React.useEffect,useMemo=window.React.useMemo,useCallback=window.React.useCallback;
+var R=window.Recharts;
+var BarChart=R.BarChart,Bar=R.Bar,Cell=R.Cell;
+var XAxis=R.XAxis,YAxis=R.YAxis,CartesianGrid=R.CartesianGrid;
+var Tooltip=R.Tooltip,ResponsiveContainer=R.ResponsiveContainer;
+var ComposedChart=R.ComposedChart,Line=R.Line,Legend=R.Legend,ReferenceLine=R.ReferenceLine;
+
+/* CONFIG */
+var PROXY_URL="https://script.google.com/macros/s/AKfycbxht2lI3b0v7RX5eEpTNm6Khn8thsAFmjbvSmk3HsBCzkWnQfqGky-2l31oyMTPHmIl/exec";
+
+/* COLORES */
+var C={
+  ing:"#10b981",eg:"#ef4444",ah:"#3b82f6",ac:"#f59e0b",
+  bg:"#0f172a",card:"#1e293b",br:"#334155",tx:"#f1f5f9",sub:"#94a3b8",
+  up:"#10b981",dn:"#ef4444",neu:"#94a3b8"
+};
+var PAL=["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6","#14b8a6",
+         "#f97316","#06b6d4","#84cc16","#ec4899","#60a5fa","#34d399",
+         "#fbbf24","#a78bfa","#fb923c","#22d3ee","#4ade80","#e879f9"];
+
+var MNOM=["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+
+/* FORMATO */
+function fARS(n,dec){
+  if(n===undefined||n===null)return"-";
+  return new Intl.NumberFormat("es-AR",{style:"currency",currency:"ARS",
+    minimumFractionDigits:dec||0,maximumFractionDigits:dec||0}).format(n);
+}
+function fUSD(n){
+  if(n===undefined||n===null)return"-";
+  return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",
+    minimumFractionDigits:0,maximumFractionDigits:0}).format(n);
+}
+function fK(n){
+  var a=Math.abs(n),s=n<0?"-":"";
+  if(a>=1000000000)return s+"$"+(a/1000000000).toFixed(1)+"B";
+  if(a>=1000000)return s+"$"+(a/1000000).toFixed(1)+"M";
+  if(a>=1000)return s+"$"+(a/1000).toFixed(0)+"k";
+  return s+"$"+a.toFixed(0);
+}
+
+/* FETCH con cache */
+var _cache={};
+async function fetchProxy(params){
+  var qs=Object.keys(params).map(function(k){return k+"="+encodeURIComponent(params[k]);}).join("&");
+  if(_cache[qs])return _cache[qs];
+  var r=await fetch(PROXY_URL+"?"+qs);
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  var j=await r.json();
+  if(!j.ok)throw new Error(j.error||"Error del proxy");
+  _cache[qs]=j.data;
+  return j.data;
+}
+function clearCache(){_cache={};}
+
+/* APP */
+function App(){
+  var hoy=new Date();
+  var anoActual=hoy.getFullYear();
+  var mesActual=hoy.getMonth()+1;
+
+  var [cargando,setCarg]=useState(true);
+  var [error,setError]=useState(null);
+  var [resumen,setResumen]=useState([]);
+  var [concMes,setConcMes]=useState([]);
+  var [mon,setMon]=useState("ARS");
+  var [filtAno,setFiltAno]=useState(anoActual);
+  var [filtMes,setFiltMes]=useState(mesActual);
+  var [cargandoConc,setCargConc]=useState(false);
+  var [tab,setTab]=useState("resumen");
+
+  function cargarResumen(){
+    setCarg(true);setError(null);clearCache();
+    Promise.all([
+      fetchProxy({req:"resumen"}),
+      fetchProxy({req:"conceptos",ano:filtAno,mes:filtMes})
+    ])
+      .then(function(results){setResumen(results[0]);setConcMes(results[1]);setCarg(false);})
+      .catch(function(e){setError(e.message);setCarg(false);});
+  }
+
+  function cargarConceptos(ano,mes){
+    setCargConc(true);
+    fetchProxy({req:"conceptos",ano:ano,mes:mes})
+      .then(function(d){setConcMes(d);setCargConc(false);})
+      .catch(function(e){setError(e.message);setCargConc(false);});
+  }
+
+  useEffect(function(){cargarResumen();},[]);
+  useEffect(function(){if(!cargando)cargarConceptos(filtAno,filtMes);},[filtAno,filtMes,cargando]);
+
+  var mesSel=useMemo(function(){
+    return resumen.find(function(r){return r.ano===filtAno&&r.mes===filtMes;})||null;
+  },[resumen,filtAno,filtMes]);
+
+  var anosDisp=useMemo(function(){
+    return [...new Set(resumen.map(function(r){return r.ano;}))].sort(function(a,b){return b-a;});
+  },[resumen]);
+
+  var USD=mon==="USD";
+
+  var gastos=useMemo(function(){
+    var g=concMes.filter(function(c){return c.tipo==="Gasto";})
+      .map(function(c){return Object.assign({},c,{val:USD?c.usd:c.ars});})
+      .sort(function(a,b){return Math.abs(b.val)-Math.abs(a.val);});
+    var tot=g.reduce(function(s,c){return s+Math.abs(c.val);},0);
+    return g.map(function(c){return Object.assign({},c,{pct:tot>0?Math.abs(c.val)/tot*100:0});});
+  },[concMes,USD]);
+
+  var ingresos=useMemo(function(){
+    var g=concMes.filter(function(c){return c.tipo==="Ingreso";})
+      .map(function(c){return Object.assign({},c,{val:USD?c.usd:c.ars});})
+      .sort(function(a,b){return Math.abs(b.val)-Math.abs(a.val);});
+    var tot=g.reduce(function(s,c){return s+Math.abs(c.val);},0);
+    return g.map(function(c){return Object.assign({},c,{pct:tot>0?Math.abs(c.val)/tot*100:0});});
+  },[concMes,USD]);
+
+  var selStyle={
+    backgroundColor:C.card,border:"1px solid "+C.br,color:C.tx,
+    borderRadius:6,padding:"3px 8px",fontSize:12
+  };
+
+  if(cargando)return(
+    <div style={{background:C.bg,height:"100vh",display:"flex",alignItems:"center",
+      justifyContent:"center",flexDirection:"column",gap:10}}>
+      <div style={{fontSize:28}}>&#9881;</div>
+      <div style={{color:C.tx,fontSize:16,fontWeight:700}}>Cargando datos...</div>
+      <div style={{color:C.sub,fontSize:12}}>Leyendo Google Sheets via Apps Script</div>
+    </div>
+  );
+
+  var tc=mesSel?mesSel.tc:0;
+
+  var TABS=[["resumen","Resumen Mensual"],["evolucion","Evolucion Anual"],["comparativo","Comparativo"]];
+
+  var topBar=(
+    <div style={{flexShrink:0,display:"flex",flexDirection:"column",gap:6}}>
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <span style={{fontSize:17,fontWeight:800,color:C.tx,whiteSpace:"nowrap"}}>
+          Finanzas Dashboard
+        </span>
+        <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid "+C.br,marginLeft:4}}>
+          {TABS.map(function(t){
+            var active=tab===t[0];
+            return(
+              <button key={t[0]} onClick={function(){setTab(t[0]);}}
+                style={{padding:"3px 14px",fontWeight:700,fontSize:11,cursor:"pointer",
+                  border:"none",borderRight:"1px solid "+C.br,
+                  backgroundColor:active?C.ah:"transparent",
+                  color:active?"#fff":C.sub,whiteSpace:"nowrap"}}>
+                {t[1]}
+              </button>
+            );
+          })}
+        </div>
+        <span style={{marginLeft:"auto",fontSize:11,color:error?C.eg:C.ing,whiteSpace:"nowrap"}}>
+          {error?"Error: "+error:"Conectado a Google Sheets"}
+        </span>
+      </div>
+
+      {/* Filtros - solo para resumen y evolucion */}
+      {tab!=="comparativo"&&<div style={{display:"flex",alignItems:"center",gap:10,
+        background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:"5px 12px"}}>
+        <span style={{fontSize:11,fontWeight:700,color:C.sub,letterSpacing:1}}>PERIODO</span>
+        <div style={{display:"flex",alignItems:"center",gap:5}}>
+          <span style={{fontSize:11,color:C.sub}}>Ano:</span>
+          <select style={selStyle} value={filtAno} onChange={function(e){setFiltAno(+e.target.value);}}>
+            {anosDisp.map(function(a){return <option key={a} value={a}>{a}</option>;})}
+          </select>
+        </div>
+        {tab==="resumen"&&<div style={{display:"flex",alignItems:"center",gap:5}}>
+          <span style={{fontSize:11,color:C.sub}}>Mes:</span>
+          <select style={selStyle} value={filtMes} onChange={function(e){setFiltMes(+e.target.value);}}>
+            {[1,2,3,4,5,6,7,8,9,10,11,12].map(function(m){
+              return <option key={m} value={m}>{MNOM[m]}</option>;
+            })}
+          </select>
+        </div>}
+        <span style={{fontSize:12,color:C.ah,fontWeight:700}}>
+          {tab==="resumen"?MNOM[filtMes]+" "+filtAno:filtAno}
+          {tab==="resumen"&&tc?" | TC: "+fARS(tc):""}
+        </span>
+        <div style={{marginLeft:"auto",display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid "+C.br}}>
+          {["ARS","USD"].map(function(m){return(
+            <button key={m} onClick={function(){setMon(m);}}
+              style={{padding:"3px 12px",fontWeight:700,fontSize:11,cursor:"pointer",
+                border:"none",backgroundColor:mon===m?C.ah:"transparent",
+                color:mon===m?"#fff":C.sub}}>
+              {m}
+            </button>
+          );})}
+        </div>
+        <button onClick={function(){cargarResumen();}}
+          style={{backgroundColor:"transparent",border:"1px solid "+C.br,color:C.sub,
+            borderRadius:6,padding:"3px 10px",fontSize:11,cursor:"pointer"}}>
+          Recargar
+        </button>
+      </div>}
+    </div>
+  );
+
+  /* VISTA RESUMEN */
+  var vistaResumen=(
+    <div style={{display:"flex",flexDirection:"column",flex:1,gap:6,minHeight:0}}>
+      {mesSel&&<div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8,flexShrink:0}}>
+        {[
+          {label:"Ingresos",val:USD?mesSel.ingUSD:mesSel.ingARS,color:C.ing,fmt:USD?fUSD:fARS},
+          {label:"Egresos",val:USD?Math.abs(mesSel.egUSD):Math.abs(mesSel.egARS),color:C.eg,fmt:USD?fUSD:fARS},
+          {label:"Ahorro",val:USD?mesSel.ahUSD:mesSel.ahARS,color:mesSel.ahARS>=0?C.ing:C.eg,fmt:USD?fUSD:fARS},
+          {label:"Ing. USD",val:mesSel.ingUSD,color:C.ing,fmt:fUSD},
+          {label:"Eg. USD",val:Math.abs(mesSel.egUSD),color:C.eg,fmt:fUSD}
+        ].map(function(k,i){return(
+          <div key={i} style={{background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:"6px 10px"}}>
+            <div style={{fontSize:10,color:C.sub,marginBottom:2}}>{k.label}</div>
+            <div style={{fontSize:13,fontWeight:700,color:k.color,lineHeight:1.2}}>{k.fmt(k.val)}</div>
+          </div>
+        );})}
+        {/* Semaforo salud financiera */}
+        <Semaforo pct={mesSel.pctAh*100} label={"Salud "+MNOM[filtMes]+" "+filtAno}/>
+      </div>}
+      <div style={{display:"flex",gap:10,flex:1,minHeight:0}}>
+        <GrafConcepto datos={gastos} color={C.eg} titulo="Top Egresos por Concepto" USD={USD} cargando={cargandoConc}/>
+        <GrafConcepto datos={ingresos} color={C.ing} titulo="Top Ingresos por Concepto" USD={USD} cargando={cargandoConc}/>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{background:C.bg,color:C.tx,height:"100vh",
+      display:"flex",flexDirection:"column",padding:"8px 14px",gap:6,overflow:"hidden"}}>
+      {topBar}
+      {tab==="resumen"&&vistaResumen}
+      {tab==="evolucion"&&<GrafEvolucion resumen={resumen} filtAno={filtAno} USD={USD}/>}
+      {tab==="comparativo"&&<Comparativo resumen={resumen} anosDisp={anosDisp} USD={USD} mon={mon} setMon={setMon} onRecargar={cargarResumen}/>}
+    </div>
+  );
+}
+
+/* SEMAFORO DE SALUD FINANCIERA */
+function Semaforo(props){
+  var pct=props.pct, label=props.label, grande=props.grande;
+  var col=pct>20?"#22c55e":pct>=0?"#f59e0b":"#ef4444";
+  var ico=pct>20?"●":"●";
+  var txt=pct>20?"Excelente":pct>=0?"Moderado":"Negativo";
+  return(
+    <div style={{background:C.card,border:"2px solid "+col,borderRadius:grande?10:8,
+      padding:grande?"10px 14px":"6px 10px",display:"flex",flexDirection:"column",
+      justifyContent:"space-between",position:"relative",overflow:"hidden"}}>
+      {/* Glow de fondo */}
+      <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,
+        background:"radial-gradient(ellipse at top left, "+col+"22 0%, transparent 70%)",
+        pointerEvents:"none"}}/>
+      <div style={{fontSize:grande?11:10,color:C.sub,marginBottom:grande?6:2,position:"relative"}}>
+        {label}
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8,position:"relative"}}>
+        <div style={{width:grande?18:14,height:grande?18:14,borderRadius:"50%",
+          backgroundColor:col,boxShadow:"0 0 10px "+col,flexShrink:0}}/>
+        <div>
+          <div style={{fontSize:grande?16:13,fontWeight:800,color:col,lineHeight:1}}>{txt}</div>
+          <div style={{fontSize:10,color:C.sub,marginTop:1}}>{pct.toFixed(1)}% ahorro</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* GRAFICO HORIZONTAL CONCEPTOS */
+function GrafConcepto(props){
+  var datos=props.datos, color=props.color, USD=props.USD;
+  if(props.cargando)return(
+    <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+      display:"flex",alignItems:"center",justifyContent:"center",color:C.sub,fontSize:12}}>
+      Cargando conceptos...
+    </div>
+  );
+  if(!datos||datos.length===0)return(
+    <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+      display:"flex",alignItems:"center",justifyContent:"center",color:C.sub,fontSize:12}}>
+      Sin datos
+    </div>
+  );
+
+  function Tip(p){
+    if(!p.active||!p.payload||!p.payload.length)return null;
+    var d=p.payload[0].payload;
+    return(
+      <div style={{background:"#1e2d3d",border:"1px solid "+C.br,borderRadius:8,
+        padding:"8px 12px",fontSize:12,boxShadow:"0 4px 12px rgba(0,0,0,0.5)"}}>
+        <div style={{fontWeight:700,color:C.tx,marginBottom:4}}>{d.conc}</div>
+        <div style={{color:color,fontWeight:600}}>{USD?fUSD(Math.abs(d.val)):fARS(Math.abs(d.val))}</div>
+        <div style={{color:C.sub}}>{d.pct.toFixed(1)}% del total</div>
+        <div style={{color:C.sub}}>{d.movs} movimiento{d.movs!==1?"s":""}</div>
+      </div>
+    );
+  }
+
+  function LblBar(p){
+    var x=p.x,y=p.y,width=p.width,height=p.height,value=p.value,index=p.index;
+    if(!value||height<12)return null;
+    var d=datos[index];
+    if(!d)return null;
+    var txt=(USD?fUSD(Math.abs(value)):fARS(Math.abs(value)))+" ("+d.pct.toFixed(1)+"%)";
+    return(
+      <text x={x+width+8} y={y+height/2} fill={C.tx} fontSize={12}
+        dominantBaseline="middle" fontWeight={700}>{txt}</text>
+    );
+  }
+
+  var maxLabel=datos.reduce(function(mx,d){
+    var txt=(USD?fUSD(Math.abs(d.val)):fARS(Math.abs(d.val)))+" ("+d.pct.toFixed(1)+"%)";
+    return Math.max(mx,txt.length);
+  },0);
+  var rightMargin=Math.min(Math.max(maxLabel*6.5,130),240);
+  var barH=Math.max(22,Math.min(32,Math.floor(400/datos.length)));
+  var chartH=datos.length*barH+20;
+
+  return(
+    <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+      padding:"10px 12px",display:"flex",flexDirection:"column",minWidth:0,minHeight:0}}>
+      <div style={{fontSize:12,fontWeight:700,color:C.tx,marginBottom:6,flexShrink:0}}>
+        {props.titulo}
+        <span style={{fontSize:10,color:C.sub,fontWeight:400,marginLeft:6}}>{datos.length} conceptos</span>
+      </div>
+      <div style={{flex:1,overflowY:"auto",overflowX:"hidden"}}>
+        <div style={{height:chartH+"px",minHeight:"100%"}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={datos} layout="vertical"
+              margin={{top:2,right:rightMargin,bottom:2,left:4}}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.br} horizontal={false}/>
+              <XAxis type="number" tick={{fill:C.sub,fontSize:9}} tickFormatter={function(v){return fK(Math.abs(v));}}/>
+              <YAxis type="category" dataKey="conc" width={130} tick={{fill:C.tx,fontSize:10}} tickLine={false}/>
+              <Tooltip content={<Tip/>} cursor={{fill:"rgba(255,255,255,0.04)"}}/>
+              <Bar dataKey="val" radius={[0,3,3,0]} label={<LblBar/>}>
+                {datos.map(function(d,i){return <Cell key={i} fill={PAL[i%PAL.length]}/>;})}</Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* EVOLUCION ANUAL */
+function GrafEvolucion(props){
+  var resumen=props.resumen,filtAno=props.filtAno,USD=props.USD;
+  var datos=useMemo(function(){
+    return resumen.filter(function(r){return r.ano===filtAno;})
+      .sort(function(a,b){return a.mes-b.mes;})
+      .map(function(r){
+        return{mes:MNOM[r.mes],ing:USD?r.ingUSD:r.ingARS,
+          eg:USD?Math.abs(r.egUSD):Math.abs(r.egARS),ah:USD?r.ahUSD:r.ahARS};
+      });
+  },[resumen,filtAno,USD]);
+
+  if(!datos||datos.length===0)return(
+    <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+      display:"flex",alignItems:"center",justifyContent:"center",color:C.sub,fontSize:13}}>
+      Sin datos para {filtAno}
+    </div>
+  );
+
+  var datosConAcum=useMemo(function(){
+    var acum=0;
+    return datos.map(function(d){acum+=d.ah;return Object.assign({},d,{acum:acum});});
+  },[datos]);
+
+  var totIng=datos.reduce(function(s,d){return s+d.ing;},0);
+  var totEg=datos.reduce(function(s,d){return s+d.eg;},0);
+  var totAh=datos.reduce(function(s,d){return s+d.ah;},0);
+  var fmt=USD?fUSD:fARS;
+
+  function TipEv(p){
+    if(!p.active||!p.payload||!p.payload.length)return null;
+    return(
+      <div style={{background:"#1e2d3d",border:"1px solid "+C.br,borderRadius:8,
+        padding:"10px 14px",fontSize:12,boxShadow:"0 4px 16px rgba(0,0,0,0.6)"}}>
+        <div style={{fontWeight:800,color:C.tx,marginBottom:6,fontSize:13}}>{p.label}</div>
+        {p.payload.map(function(e,i){
+          return <div key={i} style={{color:e.color,fontWeight:600,marginBottom:2}}>{e.name}: {fmt(Math.abs(e.value))}</div>;
+        })}
+      </div>
+    );
+  }
+
+  /* Semaforos por mes */
+  var semaforos=useMemo(function(){
+    return resumen.filter(function(r){return r.ano===filtAno;})
+      .sort(function(a,b){return a.mes-b.mes;})
+      .map(function(r){return{mes:MNOM[r.mes],pct:r.pctAh*100};});
+  },[resumen,filtAno]);
+
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",gap:10,minHeight:0}}>
+      {/* KPIs anuales + semaforo anual */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,flexShrink:0}}>
+        {[
+          {label:"Total Ingresos "+filtAno,val:totIng,color:C.ing},
+          {label:"Total Egresos "+filtAno,val:totEg,color:C.eg},
+          {label:"Ahorro Neto "+filtAno,val:totAh,color:totAh>=0?C.ing:C.eg}
+        ].map(function(k,i){return(
+          <div key={i} style={{background:C.card,border:"1px solid "+C.br,borderRadius:10,padding:"10px 14px"}}>
+            <div style={{fontSize:11,color:C.sub,marginBottom:4}}>{k.label}</div>
+            <div style={{fontSize:18,fontWeight:800,color:k.color}}>{fmt(Math.abs(k.val))}</div>
+          </div>
+        );})}
+        <Semaforo pct={totIng>0?(totAh/totIng*100):0} label={"Salud "+filtAno} grande={true}/>
+        {/* Fila de semaforos mensuales */}
+        <div style={{background:C.card,border:"1px solid "+C.br,borderRadius:10,padding:"8px 10px",
+          display:"flex",flexDirection:"column",justifyContent:"center"}}>
+          <div style={{fontSize:10,color:C.sub,marginBottom:5}}>Salud por mes</div>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+            {semaforos.map(function(s,i){
+              var col=s.pct>20?"#22c55e":s.pct>=0?"#f59e0b":"#ef4444";
+              return(
+                <div key={i} title={s.mes+": "+s.pct.toFixed(1)+"%"}
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
+                  <div style={{width:10,height:10,borderRadius:"50%",backgroundColor:col,
+                    boxShadow:"0 0 6px "+col}}/>
+                  <span style={{fontSize:7,color:C.sub}}>{s.mes}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Grafico */}
+      <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+        padding:"14px 16px",display:"flex",flexDirection:"column",minHeight:0}}>
+        <div style={{fontSize:13,fontWeight:700,color:C.tx,marginBottom:8,flexShrink:0}}>
+          Ingresos, Egresos y Ahorro por mes
+          <span style={{fontSize:11,color:C.sub,fontWeight:400,marginLeft:8}}>{USD?"USD":"ARS"}</span>
+        </div>
+        <div style={{flex:1,minHeight:0}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={datosConAcum} margin={{top:8,right:30,bottom:8,left:20}}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.br}/>
+              <XAxis dataKey="mes" tick={{fill:C.tx,fontSize:12}} tickLine={false}/>
+              <YAxis yAxisId="left" tick={{fill:C.sub,fontSize:10}} tickFormatter={function(v){return fK(v);}} width={65}/>
+              <YAxis yAxisId="right" orientation="right" tick={{fill:C.sub,fontSize:10}} tickFormatter={function(v){return fK(v);}} width={65}/>
+              <Tooltip content={<TipEv/>}/>
+              <Legend wrapperStyle={{color:C.sub,fontSize:12,paddingTop:8}}/>
+              <ReferenceLine yAxisId="left" y={0} stroke={C.br} strokeWidth={1}/>
+              <Bar yAxisId="left" dataKey="ing" name="Ingresos" fill={C.ing} opacity={0.85} radius={[4,4,0,0]} barSize={22}/>
+              <Bar yAxisId="left" dataKey="eg"  name="Egresos"  fill={C.eg}  opacity={0.85} radius={[4,4,0,0]} barSize={22}/>
+              <Bar yAxisId="left" dataKey="ah"  name="Ahorro"   fill={C.ah}  opacity={0.9}  radius={[4,4,0,0]} barSize={22}/>
+              <Line yAxisId="right" dataKey="acum" name="Ahorro Acumulado" stroke={C.ac} strokeWidth={2}
+                strokeDasharray="6 3" dot={{r:4,fill:C.ac}} activeDot={{r:6}}/>
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   COMPARATIVO
+   ================================================================ */
+function Comparativo(props){
+  var resumen=props.resumen, anosDisp=props.anosDisp, USD=props.USD, mon=props.mon, setMon=props.setMon;
+  var hoy=new Date();
+  var anoActual=hoy.getFullYear();
+  var mesActual=hoy.getMonth()+1;
+
+  /* Modo: "mes" o "ano" */
+  var [modo,setModo]=useState("mes");
+
+  /* Periodo A y B */
+  var mesPrevio=mesActual===1?12:mesActual-1;
+  var anoPrevio=mesActual===1?anoActual-1:anoActual;
+  var [pA,setPA]=useState({ano:anoActual,mes:mesActual});
+  var [pB,setPB]=useState({ano:anoPrevio,mes:mesPrevio});
+  var [anoA,setAnoA]=useState(anoActual);
+  var [anoB,setAnoB]=useState(anoActual>1?(anoActual-1):anoActual);
+
+  /* Cache de conceptos ya cargados: key "ano-mes" */
+  var [concCache,setConcCache]=useState({});
+  var [cargComp,setCargComp]=useState(false);
+
+  /* Cargar conceptos necesarios */
+  function necesitarConc(ano,mes){
+    var k=ano+"-"+mes;
+    if(concCache[k])return Promise.resolve(concCache[k]);
+    return fetchProxy({req:"conceptos",ano:ano,mes:mes})
+      .then(function(d){
+        setConcCache(function(prev){var n=Object.assign({},prev);n[k]=d;return n;});
+        return d;
+      });
+  }
+
+  useEffect(function(){
+    if(modo==="mes"){
+      setCargComp(true);
+      Promise.all([necesitarConc(pA.ano,pA.mes),necesitarConc(pB.ano,pB.mes)])
+        .then(function(){setCargComp(false);})
+        .catch(function(){setCargComp(false);});
+    }
+  },[modo,pA.ano,pA.mes,pB.ano,pB.mes]);
+
+  /* Datos A y B para modo mes */
+  var datosA=concCache[pA.ano+"-"+pA.mes]||[];
+  var datosB=concCache[pB.ano+"-"+pB.mes]||[];
+
+  /* Para modo ano: agregar movimientos del ano del resumen */
+  var resA=useMemo(function(){
+    return resumen.filter(function(r){return r.ano===anoA;});
+  },[resumen,anoA]);
+  var resB=useMemo(function(){
+    return resumen.filter(function(r){return r.ano===anoB;});
+  },[resumen,anoB]);
+
+  function sumarResumen(lista){
+    return lista.reduce(function(acc,r){
+      return{
+        ingARS:acc.ingARS+(r.ingARS||0),
+        egARS:acc.egARS+(r.egARS||0),
+        ahARS:acc.ahARS+(r.ahARS||0),
+        ingUSD:acc.ingUSD+(r.ingUSD||0),
+        egUSD:acc.egUSD+(r.egUSD||0),
+        ahUSD:acc.ahUSD+(r.ahUSD||0)
+      };
+    },{ingARS:0,egARS:0,ahARS:0,ingUSD:0,egUSD:0,ahUSD:0});
+  }
+
+  var totA=sumarResumen(resA);
+  var totB=sumarResumen(resB);
+
+  /* Etiqueta de periodo */
+  function lblPeriodo(p){return MNOM[p.mes]+" "+p.ano;}
+
+  /* Construir tabla comparativa de conceptos (modo mes) */
+  var tablaConceptos=useMemo(function(){
+    var todos={};
+    datosA.forEach(function(c){
+      todos[c.conc]={conc:c.conc,tipo:c.tipo,vA:USD?c.usd:c.ars,vB:0};
+    });
+    datosB.forEach(function(c){
+      var k=c.conc;
+      if(todos[k]){todos[k].vB=USD?c.usd:c.ars;}
+      else{todos[k]={conc:k,tipo:c.tipo,vA:0,vB:USD?c.usd:c.ars};}
+    });
+    return Object.values(todos).map(function(r){
+      var vA=r.vA, vB=r.vB;
+      var dif=vA-vB;
+      var pct=Math.abs(vB)>0?(dif/Math.abs(vB)*100):null;
+      return Object.assign({},r,{dif:dif,pct:pct});
+    });
+  },[datosA,datosB,USD]);
+
+  var gastosCmp=useMemo(function(){
+    return tablaConceptos.filter(function(r){return r.tipo==="Gasto";})
+      .sort(function(a,b){return Math.abs(b.vA)-Math.abs(a.vA);});
+  },[tablaConceptos]);
+
+  var ingresosCmp=useMemo(function(){
+    return tablaConceptos.filter(function(r){return r.tipo==="Ingreso";})
+      .sort(function(a,b){return Math.abs(b.vA)-Math.abs(a.vA);});
+  },[tablaConceptos]);
+
+  /* Analisis IA (logica deterministica) */
+  var analisis=useMemo(function(){
+    if(modo==="mes"){
+      return generarAnalisisMes(tablaConceptos,pA,pB,USD);
+    } else {
+      return generarAnalisisAno(resA,resB,anoA,anoB,USD);
+    }
+  },[tablaConceptos,resA,resB,modo,pA,pB,anoA,anoB,USD]);
+
+  var fmt=USD?fUSD:fARS;
+
+  var selStyle={
+    backgroundColor:C.card,border:"1px solid "+C.br,color:C.tx,
+    borderRadius:6,padding:"3px 8px",fontSize:12
+  };
+
+  /* KPIs comparativos para modo mes */
+  var kpiA=useMemo(function(){
+    var ing=datosA.filter(function(c){return c.tipo==="Ingreso";}).reduce(function(s,c){return s+Math.abs(USD?c.usd:c.ars);},0);
+    var eg=datosA.filter(function(c){return c.tipo==="Gasto";}).reduce(function(s,c){return s+Math.abs(USD?c.usd:c.ars);},0);
+    return{ing:ing,eg:eg,ah:ing-eg};
+  },[datosA,USD]);
+
+  var kpiB=useMemo(function(){
+    var ing=datosB.filter(function(c){return c.tipo==="Ingreso";}).reduce(function(s,c){return s+Math.abs(USD?c.usd:c.ars);},0);
+    var eg=datosB.filter(function(c){return c.tipo==="Gasto";}).reduce(function(s,c){return s+Math.abs(USD?c.usd:c.ars);},0);
+    return{ing:ing,eg:eg,ah:ing-eg};
+  },[datosB,USD]);
+
+  function difColor(dif,esGasto){
+    if(Math.abs(dif)<0.5)return C.neu;
+    if(esGasto) return dif>0?C.dn:C.up;
+    return dif>0?C.up:C.dn;
+  }
+
+  function flechaDif(dif){
+    if(Math.abs(dif)<0.5)return "=";
+    return dif>0?"▲":"▼";
+  }
+
+  function TblConceptos(tprops){
+    var filas=tprops.filas, esGasto=tprops.esGasto, lblA=tprops.lblA, lblB=tprops.lblB;
+    if(!filas||filas.length===0)return(
+      <div style={{color:C.sub,fontSize:12,textAlign:"center",padding:"20px 0"}}>Sin datos</div>
+    );
+    return(
+      <div style={{overflowY:"auto",flex:1}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+          <thead>
+            <tr style={{borderBottom:"1px solid "+C.br}}>
+              <th style={{textAlign:"left",padding:"5px 8px",color:C.sub,fontWeight:700,position:"sticky",top:0,background:C.card}}>Concepto</th>
+              <th style={{textAlign:"right",padding:"5px 8px",color:C.sub,fontWeight:700,position:"sticky",top:0,background:C.card}}>{lblA}</th>
+              <th style={{textAlign:"right",padding:"5px 8px",color:C.sub,fontWeight:700,position:"sticky",top:0,background:C.card}}>{lblB}</th>
+              <th style={{textAlign:"right",padding:"5px 8px",color:C.sub,fontWeight:700,position:"sticky",top:0,background:C.card}}>Dif $</th>
+              <th style={{textAlign:"right",padding:"5px 8px",color:C.sub,fontWeight:700,position:"sticky",top:0,background:C.card}}>Dif %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map(function(r,i){
+              var dc=difColor(r.dif,esGasto);
+              return(
+                <tr key={i} className="tbl-row" style={{borderBottom:"1px solid rgba(51,65,85,0.5)"}}>
+                  <td style={{padding:"5px 8px",color:C.tx,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.conc}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right",color:C.tx,fontWeight:600}}>{fmt(Math.abs(r.vA))}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right",color:C.sub}}>{fmt(Math.abs(r.vB))}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right",color:dc,fontWeight:700}}>
+                    {flechaDif(r.dif)} {fmt(Math.abs(r.dif))}
+                  </td>
+                  <td style={{padding:"5px 8px",textAlign:"right",color:dc,fontWeight:700}}>
+                    {r.pct!==null?(Math.abs(r.pct).toFixed(1)+"%"):"-"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  /* ── RENDER ── */
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",gap:8,minHeight:0}}>
+
+      {/* Barra de controles del comparativo */}
+      <div style={{flexShrink:0,background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:"6px 12px",
+        display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+
+        {/* Toggle Mes / Ano */}
+        <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid "+C.br}}>
+          {[["mes","Por Mes"],["ano","Por Ano"]].map(function(m){
+            var act=modo===m[0];
+            return(
+              <button key={m[0]} onClick={function(){setModo(m[0]);}}
+                style={{padding:"3px 12px",fontWeight:700,fontSize:11,cursor:"pointer",
+                  border:"none",backgroundColor:act?"#6366f1":"transparent",color:act?"#fff":C.sub}}>
+                {m[1]}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Selectores segun modo */}
+        {modo==="mes"&&<div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:11,color:C.sub,fontWeight:700}}>Periodo A:</span>
+          <select style={selStyle} value={pA.ano} onChange={function(e){setPA(function(p){return Object.assign({},p,{ano:+e.target.value});});}}>
+            {anosDisp.map(function(a){return <option key={a} value={a}>{a}</option>;})}
+          </select>
+          <select style={selStyle} value={pA.mes} onChange={function(e){setPA(function(p){return Object.assign({},p,{mes:+e.target.value});});}}>
+            {[1,2,3,4,5,6,7,8,9,10,11,12].map(function(m){return <option key={m} value={m}>{MNOM[m]}</option>;})}
+          </select>
+          <span style={{fontSize:11,color:C.sub,fontWeight:700,marginLeft:8}}>vs Periodo B:</span>
+          <select style={selStyle} value={pB.ano} onChange={function(e){setPB(function(p){return Object.assign({},p,{ano:+e.target.value});});}}>
+            {anosDisp.map(function(a){return <option key={a} value={a}>{a}</option>;})}
+          </select>
+          <select style={selStyle} value={pB.mes} onChange={function(e){setPB(function(p){return Object.assign({},p,{mes:+e.target.value});});}}>
+            {[1,2,3,4,5,6,7,8,9,10,11,12].map(function(m){return <option key={m} value={m}>{MNOM[m]}</option>;})}
+          </select>
+        </div>}
+
+        {modo==="ano"&&<div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:11,color:C.sub,fontWeight:700}}>Ano A:</span>
+          <select style={selStyle} value={anoA} onChange={function(e){setAnoA(+e.target.value);}}>
+            {anosDisp.map(function(a){return <option key={a} value={a}>{a}</option>;})}
+          </select>
+          <span style={{fontSize:11,color:C.sub,fontWeight:700,marginLeft:8}}>vs Ano B:</span>
+          <select style={selStyle} value={anoB} onChange={function(e){setAnoB(+e.target.value);}}>
+            {anosDisp.map(function(a){return <option key={a} value={a}>{a}</option>;})}
+          </select>
+        </div>}
+
+        {/* Moneda */}
+        <div style={{marginLeft:"auto",display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid "+C.br}}>
+          {["ARS","USD"].map(function(m){return(
+            <button key={m} onClick={function(){setMon(m);}}
+              style={{padding:"3px 12px",fontWeight:700,fontSize:11,cursor:"pointer",
+                border:"none",backgroundColor:mon===m?C.ah:"transparent",color:mon===m?"#fff":C.sub}}>
+              {m}
+            </button>
+          );})}
+        </div>
+      </div>
+
+      {/* Contenido segun modo */}
+      {modo==="mes"&&(
+        <div style={{flex:1,display:"flex",flexDirection:"column",gap:8,minHeight:0}}>
+
+          {/* KPIs comparativos */}
+          {cargComp?(
+            <div style={{flexShrink:0,color:C.sub,fontSize:12,textAlign:"center",padding:"8px 0"}}>
+              Cargando datos del periodo...
+            </div>
+          ):(
+            <div style={{flexShrink:0,display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8}}>
+              {[
+                {label:"Ingresos "+lblPeriodo(pA),val:kpiA.ing,color:C.ing},
+                {label:"Egresos "+lblPeriodo(pA),val:kpiA.eg,color:C.eg},
+                {label:"Ahorro "+lblPeriodo(pA),val:kpiA.ah,color:kpiA.ah>=0?C.ing:C.eg},
+                {label:"Ingresos "+lblPeriodo(pB),val:kpiB.ing,color:C.ing},
+                {label:"Egresos "+lblPeriodo(pB),val:kpiB.eg,color:C.eg},
+                {label:"Ahorro "+lblPeriodo(pB),val:kpiB.ah,color:kpiB.ah>=0?C.ing:C.eg}
+              ].map(function(k,i){return(
+                <div key={i} style={{background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:"6px 10px"}}>
+                  <div style={{fontSize:9,color:C.sub,marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.label}</div>
+                  <div style={{fontSize:13,fontWeight:700,color:k.color}}>{fmt(Math.abs(k.val))}</div>
+                </div>
+              );})}
+            </div>
+          )}
+
+          {/* Tablas lado a lado */}
+          <div style={{flex:1,display:"flex",gap:8,minHeight:0}}>
+            <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+              padding:"10px 12px",display:"flex",flexDirection:"column",minHeight:0}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.eg,marginBottom:6,flexShrink:0}}>
+                Egresos por Concepto
+                <span style={{fontSize:10,color:C.sub,fontWeight:400,marginLeft:6}}>{lblPeriodo(pA)} vs {lblPeriodo(pB)}</span>
+              </div>
+              <TblConceptos filas={gastosCmp} esGasto={true} lblA={lblPeriodo(pA)} lblB={lblPeriodo(pB)}/>
+            </div>
+            <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+              padding:"10px 12px",display:"flex",flexDirection:"column",minHeight:0}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.ing,marginBottom:6,flexShrink:0}}>
+                Ingresos por Concepto
+                <span style={{fontSize:10,color:C.sub,fontWeight:400,marginLeft:6}}>{lblPeriodo(pA)} vs {lblPeriodo(pB)}</span>
+              </div>
+              <TblConceptos filas={ingresosCmp} esGasto={false} lblA={lblPeriodo(pA)} lblB={lblPeriodo(pB)}/>
+            </div>
+          </div>
+
+          {/* Resumen IA */}
+          <PanelIA analisis={analisis}/>
+        </div>
+      )}
+
+      {modo==="ano"&&(
+        <div style={{flex:1,display:"flex",flexDirection:"column",gap:8,minHeight:0,overflowY:"auto"}}>
+
+          {/* KPIs anuales comparativos */}
+          <div style={{flexShrink:0,display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8}}>
+            {[
+              {label:"Ingresos "+anoA,val:USD?totA.ingUSD:totA.ingARS,color:C.ing},
+              {label:"Egresos "+anoA,val:USD?Math.abs(totA.egUSD):Math.abs(totA.egARS),color:C.eg},
+              {label:"Ahorro "+anoA,val:USD?totA.ahUSD:totA.ahARS,color:(USD?totA.ahUSD:totA.ahARS)>=0?C.ing:C.eg},
+              {label:"Ingresos "+anoB,val:USD?totB.ingUSD:totB.ingARS,color:C.ing},
+              {label:"Egresos "+anoB,val:USD?Math.abs(totB.egUSD):Math.abs(totB.egARS),color:C.eg},
+              {label:"Ahorro "+anoB,val:USD?totB.ahUSD:totB.ahARS,color:(USD?totB.ahUSD:totB.ahARS)>=0?C.ing:C.eg}
+            ].map(function(k,i){return(
+              <div key={i} style={{background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:"6px 10px"}}>
+                <div style={{fontSize:9,color:C.sub,marginBottom:2}}>{k.label}</div>
+                <div style={{fontSize:13,fontWeight:700,color:k.color}}>{fmt(Math.abs(k.val))}</div>
+              </div>
+            );})}
+          </div>
+
+          {/* Grafico barras ano A vs ano B por mes */}
+          <GrafComparativoAnual resumen={resumen} anoA={anoA} anoB={anoB} USD={USD}/>
+
+          {/* Resumen IA */}
+          <PanelIA analisis={analisis}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Grafico comparativo mensual de dos anos */
+function GrafComparativoAnual(props){
+  var resumen=props.resumen,anoA=props.anoA,anoB=props.anoB,USD=props.USD;
+  var datos=useMemo(function(){
+    var meses=[1,2,3,4,5,6,7,8,9,10,11,12];
+    return meses.map(function(m){
+      var rA=resumen.find(function(r){return r.ano===anoA&&r.mes===m;});
+      var rB=resumen.find(function(r){return r.ano===anoB&&r.mes===m;});
+      return{
+        mes:MNOM[m],
+        ingA:rA?(USD?rA.ingUSD:rA.ingARS):null,
+        egA:rA?(USD?Math.abs(rA.egUSD):Math.abs(rA.egARS)):null,
+        ingB:rB?(USD?rB.ingUSD:rB.ingARS):null,
+        egB:rB?(USD?Math.abs(rB.egUSD):Math.abs(rB.egARS)):null
+      };
+    }).filter(function(d){return d.ingA!==null||d.ingB!==null;});
+  },[resumen,anoA,anoB,USD]);
+
+  if(!datos||datos.length===0)return null;
+
+  function TipCmp(p){
+    if(!p.active||!p.payload||!p.payload.length)return null;
+    var fmt=USD?fUSD:fARS;
+    return(
+      <div style={{background:"#1e2d3d",border:"1px solid "+C.br,borderRadius:8,
+        padding:"10px 14px",fontSize:11,boxShadow:"0 4px 16px rgba(0,0,0,0.6)"}}>
+        <div style={{fontWeight:800,color:C.tx,marginBottom:6}}>{p.label}</div>
+        {p.payload.map(function(e,i){
+          return e.value!==null&&<div key={i} style={{color:e.color,fontWeight:600,marginBottom:2}}>{e.name}: {fmt(e.value)}</div>;
+        })}
+      </div>
+    );
+  }
+
+  return(
+    <div style={{flexShrink:0,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+      padding:"12px 14px",height:280}}>
+      <div style={{fontSize:12,fontWeight:700,color:C.tx,marginBottom:8}}>
+        Ingresos y Egresos mensuales: {anoA} vs {anoB}
+      </div>
+      <div style={{height:230}}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={datos} margin={{top:4,right:20,bottom:4,left:20}}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.br}/>
+            <XAxis dataKey="mes" tick={{fill:C.tx,fontSize:11}} tickLine={false}/>
+            <YAxis tick={{fill:C.sub,fontSize:10}} tickFormatter={function(v){return fK(v);}} width={60}/>
+            <Tooltip content={<TipCmp/>}/>
+            <Legend wrapperStyle={{color:C.sub,fontSize:11,paddingTop:4}}/>
+            <Bar dataKey="ingA" name={"Ing "+anoA} fill={C.ing} opacity={0.9} radius={[3,3,0,0]} barSize={14}/>
+            <Bar dataKey="egA"  name={"Eg "+anoA}  fill={C.eg}  opacity={0.9} radius={[3,3,0,0]} barSize={14}/>
+            <Bar dataKey="ingB" name={"Ing "+anoB} fill="#34d399" opacity={0.7} radius={[3,3,0,0]} barSize={14}/>
+            <Bar dataKey="egB"  name={"Eg "+anoB}  fill="#fca5a5" opacity={0.7} radius={[3,3,0,0]} barSize={14}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+/* Panel de Resumen IA */
+function PanelIA(props){
+  var a=props.analisis;
+  if(!a)return null;
+  return(
+    <div style={{flexShrink:0,background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.3)",
+      borderRadius:10,padding:"12px 16px"}}>
+      <div style={{fontSize:12,fontWeight:800,color:"#a5b4fc",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
+        <span>&#129504;</span> Resumen IA
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        {a.subieron&&a.subieron.length>0&&(
+          <div>
+            <div style={{fontSize:10,fontWeight:700,color:C.eg,marginBottom:4}}>Conceptos que mas subieron</div>
+            {a.subieron.map(function(x,i){
+              return(
+                <div key={i} style={{fontSize:11,color:C.tx,marginBottom:2}}>
+                  <span style={{color:C.eg}}>▲ </span>{x.conc}
+                  <span style={{color:C.sub}}> +{x.pct.toFixed(0)}% ({x.tipo})</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {a.bajaron&&a.bajaron.length>0&&(
+          <div>
+            <div style={{fontSize:10,fontWeight:700,color:C.ing,marginBottom:4}}>Conceptos que mas bajaron</div>
+            {a.bajaron.map(function(x,i){
+              return(
+                <div key={i} style={{fontSize:11,color:C.tx,marginBottom:2}}>
+                  <span style={{color:C.ing}}>▼ </span>{x.conc}
+                  <span style={{color:C.sub}}> -{x.pct.toFixed(0)}% ({x.tipo})</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {a.nuevosA&&a.nuevosA.length>0&&(
+          <div>
+            <div style={{fontSize:10,fontWeight:700,color:C.ac,marginBottom:4}}>Solo en Periodo A</div>
+            {a.nuevosA.map(function(x,i){
+              return <div key={i} style={{fontSize:11,color:C.sub,marginBottom:2}}>+ {x.conc} ({x.tipo})</div>;
+            })}
+          </div>
+        )}
+        {a.nuevosB&&a.nuevosB.length>0&&(
+          <div>
+            <div style={{fontSize:10,fontWeight:700,color:C.ac,marginBottom:4}}>Solo en Periodo B</div>
+            {a.nuevosB.map(function(x,i){
+              return <div key={i} style={{fontSize:11,color:C.sub,marginBottom:2}}>+ {x.conc} ({x.tipo})</div>;
+            })}
+          </div>
+        )}
+      </div>
+      {a.otros&&a.otros.length>0&&(
+        <div style={{marginBottom:8}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.sub,marginBottom:4}}>Aspectos relevantes</div>
+          {a.otros.map(function(t,i){
+            return <div key={i} style={{fontSize:11,color:C.sub,marginBottom:2}}>&#8226; {t}</div>;
+          })}
+        </div>
+      )}
+      <div style={{borderTop:"1px solid rgba(99,102,241,0.2)",paddingTop:8,fontSize:11,
+        color:C.tx,lineHeight:1.6,fontStyle:"italic"}}>
+        {a.conclusion}
+      </div>
+    </div>
+  );
+}
+
+/* ── LOGICA DE ANALISIS IA ── */
+
+function generarAnalisisMes(tabla,pA,pB,USD){
+  if(!tabla||tabla.length===0)return null;
+  var fmt=USD?fUSD:fARS;
+
+  var conDatos=tabla.filter(function(r){return r.vA!==0||r.vB!==0;});
+  var nuevosA=conDatos.filter(function(r){return r.vB===0&&r.vA!==0;});
+  var nuevosB=conDatos.filter(function(r){return r.vA===0&&r.vB!==0;});
+  var comunes=conDatos.filter(function(r){return r.vA!==0&&r.vB!==0&&r.pct!==null;});
+
+  /* Mayores subidas (dif positiva para gastos = sube, para ingresos = sube tambien segun magnitud) */
+  var subieron=comunes.slice().sort(function(a,b){return b.pct-a.pct;})
+    .filter(function(r){return r.pct>5;}).slice(0,4);
+  var bajaron=comunes.slice().sort(function(a,b){return a.pct-b.pct;})
+    .filter(function(r){return r.pct<-5;}).slice(0,4);
+
+  /* Totales por tipo */
+  var totIngA=conDatos.filter(function(r){return r.tipo==="Ingreso";}).reduce(function(s,r){return s+Math.abs(r.vA);},0);
+  var totEgA=conDatos.filter(function(r){return r.tipo==="Gasto";}).reduce(function(s,r){return s+Math.abs(r.vA);},0);
+  var totIngB=conDatos.filter(function(r){return r.tipo==="Ingreso";}).reduce(function(s,r){return s+Math.abs(r.vB);},0);
+  var totEgB=conDatos.filter(function(r){return r.tipo==="Gasto";}).reduce(function(s,r){return s+Math.abs(r.vB);},0);
+  var ahA=totIngA-totEgA, ahB=totIngB-totEgB;
+  var pctAhA=totIngA>0?ahA/totIngA*100:0;
+  var pctAhB=totIngB>0?ahB/totIngB*100:0;
+  var lblA=MNOM[pA.mes]+" "+pA.ano, lblB=MNOM[pB.mes]+" "+pB.ano;
+
+  var otros=[];
+  var difIng=totIngA-totIngB;
+  var difEg=totEgA-totEgB;
+  if(Math.abs(difIng)>100){
+    otros.push("Los ingresos de "+lblA+(difIng>0?" fueron "+fmt(difIng)+" mayores":" fueron "+fmt(Math.abs(difIng))+" menores")+" que en "+lblB+".");
+  }
+  if(Math.abs(difEg)>100){
+    otros.push("Los egresos de "+lblA+(difEg>0?" fueron "+fmt(difEg)+" mayores":" fueron "+fmt(Math.abs(difEg))+" menores")+" que en "+lblB+".");
+  }
+  if(nuevosA.length>0){
+    otros.push("En "+lblA+" aparecen "+nuevosA.length+" concepto"+(nuevosA.length>1?"s":"")+" que no existian en "+lblB+".");
+  }
+  if(nuevosB.length>0){
+    otros.push("En "+lblB+" habia "+nuevosB.length+" concepto"+(nuevosB.length>1?"s":"")+" que no aparece"+(nuevosB.length>1?"n":"")+" en "+lblA+".");
+  }
+
+  /* Conclusion */
+  var mejoro=ahA>ahB;
+  var difAh=Math.abs(ahA-ahB);
+  var conclusion="";
+  if(Math.abs(ahA-ahB)<100){
+    conclusion="Los resultados financieros de "+lblA+" y "+lblB+" son practicamente equivalentes, con un ahorro similar en ambos periodos.";
+  } else if(mejoro){
+    conclusion="En terminos generales, "+lblA+" fue un mejor mes que "+lblB+": el ahorro fue mayor en "+fmt(difAh)+" ("+pctAhA.toFixed(1)+"% vs "+pctAhB.toFixed(1)+"% de tasa de ahorro). "+(difIng>0?"Los ingresos subieron":"Los egresos bajaron")+", lo que explica la mejora.";
+  } else {
+    conclusion="En terminos generales, "+lblA+" fue un mes menos favorable que "+lblB+": el ahorro fue menor en "+fmt(difAh)+" ("+pctAhA.toFixed(1)+"% vs "+pctAhB.toFixed(1)+"% de tasa de ahorro). "+(difIng<0?"Los ingresos bajaron":"Los egresos subieron")+", lo que explica la diferencia.";
+  }
+
+  return{subieron:subieron,bajaron:bajaron,nuevosA:nuevosA,nuevosB:nuevosB,otros:otros,conclusion:conclusion};
+}
+
+function generarAnalisisAno(resA,resB,anoA,anoB,USD){
+  if(!resA||resA.length===0)return null;
+  var fmt=USD?fUSD:fARS;
+
+  function totAnio(res){
+    return res.reduce(function(acc,r){
+      return{
+        ing:acc.ing+(USD?r.ingUSD:r.ingARS),
+        eg:acc.eg+(USD?Math.abs(r.egUSD):Math.abs(r.egARS)),
+        ah:acc.ah+(USD?r.ahUSD:r.ahARS)
+      };
+    },{ing:0,eg:0,ah:0});
+  }
+
+  var tA=totAnio(resA), tB=totAnio(resB);
+  var mejoro=tA.ah>tB.ah;
+  var difAh=Math.abs(tA.ah-tB.ah);
+  var difIng=tA.ing-tB.ing;
+  var difEg=tA.eg-tB.eg;
+  var pctAhA=tA.ing>0?tA.ah/tA.ing*100:0;
+  var pctAhB=tB.ing>0?tB.ah/tB.ing*100:0;
+
+  var otros=[];
+  if(Math.abs(difIng)>100) otros.push("Los ingresos de "+anoA+(difIng>0?" superaron":" fueron menores")+" a los de "+anoB+" en "+fmt(Math.abs(difIng))+".");
+  if(Math.abs(difEg)>100) otros.push("Los egresos de "+anoA+(difEg>0?" fueron mayores":" fueron menores")+" que en "+anoB+" en "+fmt(Math.abs(difEg))+".");
+  if(resA.length!==resB.length) otros.push("El ano "+anoA+" tiene "+resA.length+" meses registrados y "+anoB+" tiene "+resB.length+" meses (comparacion parcial).");
+
+  var conclusion="";
+  if(Math.abs(tA.ah-tB.ah)<100){
+    conclusion="El desempeno financiero de "+anoA+" y "+anoB+" es practicamente equivalente en terminos de ahorro neto.";
+  } else if(mejoro){
+    conclusion="El ano "+anoA+" fue financieramente mejor que "+anoB+": el ahorro neto fue superior en "+fmt(difAh)+" ("+pctAhA.toFixed(1)+"% vs "+pctAhB.toFixed(1)+"% de tasa de ahorro anual).";
+  } else {
+    conclusion="El ano "+anoA+" fue financieramente inferior a "+anoB+": el ahorro neto fue menor en "+fmt(difAh)+" ("+pctAhA.toFixed(1)+"% vs "+pctAhB.toFixed(1)+"% de tasa de ahorro anual).";
+  }
+
+  return{subieron:[],bajaron:[],nuevosA:[],nuevosB:[],otros:otros,conclusion:conclusion};
+}
+
+window.ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
