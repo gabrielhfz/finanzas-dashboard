@@ -1,0 +1,1713 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Finanzas Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.10.4/umd/Recharts.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body{margin:0;background:#0f172a;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
+    @media(max-width:699px){body{overflow:auto;}}
+    *{box-sizing:border-box;}
+    ::-webkit-scrollbar{width:5px;height:5px;}
+    ::-webkit-scrollbar-track{background:#1e293b;}
+    ::-webkit-scrollbar-thumb{background:#475569;border-radius:3px;}
+    select option{background:#1e293b;color:#f1f5f9;}
+    select{cursor:pointer;}
+    .tbl-row:hover{background:rgba(255,255,255,0.04);}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+var useState=window.React.useState,useEffect=window.React.useEffect,useMemo=window.React.useMemo,useCallback=window.React.useCallback;
+var R=window.Recharts;
+var BarChart=R.BarChart,Bar=R.Bar,Cell=R.Cell;
+var XAxis=R.XAxis,YAxis=R.YAxis,CartesianGrid=R.CartesianGrid;
+var Tooltip=R.Tooltip,ResponsiveContainer=R.ResponsiveContainer;
+var ComposedChart=R.ComposedChart,Line=R.Line,Legend=R.Legend,ReferenceLine=R.ReferenceLine;
+
+/* HOOK MOBILE */
+function useIsMobile(){
+  var [mob,setMob]=useState(window.innerWidth<700);
+  useEffect(function(){
+    function onResize(){setMob(window.innerWidth<700);}
+    window.addEventListener("resize",onResize);
+    return function(){window.removeEventListener("resize",onResize);};
+  },[]);
+  return mob;
+}
+
+/* CONFIG */
+var PROXY_URL="https://script.google.com/macros/s/AKfycbzjPTlzRBfguPFFypTmbUJW7BX4FT-0g_2rO20F7OAVjeawc6BX9zty71uIy5rgUNtT/exec";
+
+/* COLORES */
+var C={
+  ing:"#10b981",eg:"#ef4444",ah:"#3b82f6",ac:"#f59e0b",
+  bg:"#0f172a",card:"#1e293b",br:"#334155",tx:"#f1f5f9",sub:"#94a3b8",
+  up:"#10b981",dn:"#ef4444",neu:"#94a3b8"
+};
+var PAL=["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6","#14b8a6",
+         "#f97316","#06b6d4","#84cc16","#ec4899","#60a5fa","#34d399",
+         "#fbbf24","#a78bfa","#fb923c","#22d3ee","#4ade80","#e879f9"];
+
+var MNOM=["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+
+/* FORMATO */
+function fARS(n,dec){
+  if(n===undefined||n===null)return"-";
+  return new Intl.NumberFormat("es-AR",{style:"currency",currency:"ARS",
+    minimumFractionDigits:dec||0,maximumFractionDigits:dec||0}).format(n);
+}
+function fUSD(n){
+  if(n===undefined||n===null)return"-";
+  var s=n<0?"-":"";
+  var abs=Math.abs(n);
+  return s+"USD "+new Intl.NumberFormat("en-US",{minimumFractionDigits:0,maximumFractionDigits:0}).format(abs);
+}
+function fK(n,usd){
+  var a=Math.abs(n),s=n<0?"-":"";
+  var sym=usd?"USD ":"$";
+  if(a>=1000000000)return s+sym+(a/1000000000).toFixed(1)+"B";
+  if(a>=1000000)return s+sym+(a/1000000).toFixed(1)+"M";
+  if(a>=1000)return s+sym+(a/1000).toFixed(0)+"k";
+  return s+sym+a.toFixed(0);
+}
+
+/* FETCH con cache */
+var _cache={};
+async function fetchProxy(params){
+  var qs=Object.keys(params).map(function(k){return k+"="+encodeURIComponent(params[k]);}).join("&");
+  if(_cache[qs])return _cache[qs];
+  var r=await fetch(PROXY_URL+"?"+qs);
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  var j=await r.json();
+  if(!j.ok)throw new Error(j.error||"Error del proxy");
+  _cache[qs]=j.data;
+  return j.data;
+}
+function clearCache(){_cache={};}
+
+/* APP */
+function App(){
+  var mob=useIsMobile();
+  var hoy=new Date();
+  var anoActual=hoy.getFullYear();
+  var mesActual=hoy.getMonth()+1;
+
+  var [cargando,setCarg]=useState(true);
+  var [error,setError]=useState(null);
+  var [resumen,setResumen]=useState([]);
+  var [ultimaFecha,setUltimaFecha]=useState(null);
+  var [concMes,setConcMes]=useState([]);
+  var [mon,setMon]=useState("ARS");
+  var [filtAno,setFiltAno]=useState(anoActual);
+  var [filtMeses,setFiltMeses]=useState([mesActual]);
+  var [cargandoConc,setCargConc]=useState(false);
+  var [tab,setTab]=useState("resumen");
+  var [subTabResumen,setSubTabResumen]=useState("movimientos"); /* "movimientos" | "saldos" */
+  var [dropMesOpen,setDropMesOpen]=useState(false);
+  /* Saldos por Caja/Banco */
+  var [saldosMes,setSaldosMes]=useState([]);
+  var [cargandoSaldos,setCargSaldos]=useState(false);
+  var [filtMesSaldo,setFiltMesSaldo]=useState(mesActual); /* un solo mes para saldos */
+  var [ordenSaldos,setOrdenSaldos]=useState("mpOrden"); /* default: orden del Access */
+
+  function cargarResumen(){
+    setCarg(true);setError(null);clearCache();
+    fetchProxy({req:"resumen"})
+      .then(function(r){
+        /* El proxy devuelve {meses:[...], ultimaFecha:"DD/MM/YYYY HH:MM"}
+           Compatibilidad hacia atras: si r es array (version vieja del proxy), usarlo directo */
+        if(Array.isArray(r)){
+          setResumen(r);
+          setUltimaFecha(null); /* proxy viejo no envia fecha — se mostrara N/D */
+        } else {
+          setResumen(r.meses||[]);
+          setUltimaFecha(r.ultimaFecha||null);
+        }
+        setCarg(false);
+      })
+      .catch(function(e){setError(e.message);setCarg(false);});
+  }
+
+  function cargarSaldos(ano,mes){
+    if(!ano||!mes)return;
+    setCargSaldos(true);
+    setSaldosMes([]);
+    setError(null);
+    console.log("[Saldos] Llamando req=saldos ano="+ano+" mes="+mes);
+    fetchProxy({req:"saldos",ano:ano,mes:mes})
+      .then(function(d){
+        console.log("[Saldos] OK filas="+d.length);
+        setSaldosMes(d);
+        setCargSaldos(false);
+      })
+      .catch(function(e){
+        console.error("[Saldos] ERROR: "+e.message);
+        setError("Saldos: "+e.message);
+        setCargSaldos(false);
+      });
+  }
+
+  function cargarConceptosMeses(ano,meses){
+    if(!meses||meses.length===0)return;
+    setCargConc(true);
+    Promise.all(meses.map(function(m){return fetchProxy({req:"conceptos",ano:ano,mes:m});}))
+      .then(function(resultados){
+        /* Acumular: sumar valores por concepto */
+        var mapa={};
+        resultados.forEach(function(datos){
+          datos.forEach(function(c){
+            if(!mapa[c.conc]){
+              mapa[c.conc]={conc:c.conc,tipo:c.tipo,ars:0,usd:0};
+            }
+            mapa[c.conc].ars+=c.ars||0;
+            mapa[c.conc].usd+=c.usd||0;
+          });
+        });
+        setConcMes(Object.values(mapa));
+        setCargConc(false);
+      })
+      .catch(function(e){setError(e.message);setCargConc(false);});
+  }
+
+  useEffect(function(){cargarResumen();},[]);
+  useEffect(function(){if(!cargando)cargarConceptosMeses(filtAno,filtMeses);},[filtAno,filtMeses,cargando]);
+  useEffect(function(){
+    console.log("[Effect] cargando="+cargando+" subTab="+subTabResumen+" ano="+filtAno+" mes="+filtMesSaldo);
+    if(!cargando&&subTabResumen==="saldos")cargarSaldos(filtAno,filtMesSaldo);
+  },[filtAno,filtMesSaldo,subTabResumen,cargando]);
+
+  /* KPIs acumulados de los meses seleccionados desde resumen */
+  var mesSel=useMemo(function(){
+    var filas=resumen.filter(function(r){return r.ano===filtAno&&filtMeses.indexOf(r.mes)>=0;});
+    if(filas.length===0)return null;
+    var ingARS=filas.reduce(function(s,r){return s+r.ingARS;},0);
+    var egARS=filas.reduce(function(s,r){return s+r.egARS;},0);
+    var ahARS=filas.reduce(function(s,r){return s+r.ahARS;},0);
+    var ingUSD=filas.reduce(function(s,r){return s+r.ingUSD;},0);
+    var egUSD=filas.reduce(function(s,r){return s+r.egUSD;},0);
+    var ahUSD=filas.reduce(function(s,r){return s+r.ahUSD;},0);
+    var pctAh=ingARS>0?ahARS/ingARS:0;
+    /* tc: usar el del mes mas reciente seleccionado */
+    var tc=filas.reduce(function(max,r){return r.mes>max.mes?r:max;},filas[0]).tc;
+    return{ingARS:ingARS,egARS:egARS,ahARS:ahARS,ingUSD:ingUSD,egUSD:egUSD,ahUSD:ahUSD,pctAh:pctAh,tc:tc};
+  },[resumen,filtAno,filtMeses]);
+
+  var anosDisp=useMemo(function(){
+    return [...new Set(resumen.map(function(r){return r.ano;}))].sort(function(a,b){return b-a;});
+  },[resumen]);
+
+  /* Meses con datos para el ano seleccionado */
+  var mesesConDatos=useMemo(function(){
+    return resumen.filter(function(r){return r.ano===filtAno;}).map(function(r){return r.mes;});
+  },[resumen,filtAno]);
+
+  /* Label del periodo seleccionado */
+  var lblPeriodoSel=useMemo(function(){
+    if(filtMeses.length===0)return "Sin meses";
+    var sorted=filtMeses.slice().sort(function(a,b){return a-b;});
+    if(sorted.length===1)return MNOM[sorted[0]]+" "+filtAno;
+    /* Detectar si es rango continuo */
+    var esRango=sorted.every(function(m,i){return i===0||m===sorted[i-1]+1;});
+    if(esRango)return MNOM[sorted[0]]+" - "+MNOM[sorted[sorted.length-1]]+" "+filtAno;
+    return sorted.map(function(m){return MNOM[m];}).join(", ")+" "+filtAno;
+  },[filtMeses,filtAno]);
+
+  var USD=mon==="USD";
+  var [modoGraf,setModoGraf]=useState("acumulado"); /* "acumulado" | "promedio" */
+
+  var nMeses=filtMeses.length||1;
+
+  var gastos=useMemo(function(){
+    var g=concMes.filter(function(c){return c.tipo==="Gasto";})
+      .map(function(c){return Object.assign({},c,{val:USD?c.usd:c.ars});})
+      .sort(function(a,b){return Math.abs(b.val)-Math.abs(a.val);});
+    var tot=g.reduce(function(s,c){return s+Math.abs(c.val);},0);
+    return g.map(function(c){return Object.assign({},c,{pct:tot>0?Math.abs(c.val)/tot*100:0});});
+  },[concMes,USD]);
+
+  var ingresos=useMemo(function(){
+    var g=concMes.filter(function(c){return c.tipo==="Ingreso";})
+      .map(function(c){return Object.assign({},c,{val:USD?c.usd:c.ars});})
+      .sort(function(a,b){return Math.abs(b.val)-Math.abs(a.val);});
+    var tot=g.reduce(function(s,c){return s+Math.abs(c.val);},0);
+    return g.map(function(c){return Object.assign({},c,{pct:tot>0?Math.abs(c.val)/tot*100:0});});
+  },[concMes,USD]);
+
+  /* Datos promedio: mismos porcentajes, valores divididos por nMeses */
+  var gastosProm=useMemo(function(){
+    return gastos.map(function(c){return Object.assign({},c,{val:c.val/nMeses});});
+  },[gastos,nMeses]);
+
+  var ingresosProm=useMemo(function(){
+    return ingresos.map(function(c){return Object.assign({},c,{val:c.val/nMeses});});
+  },[ingresos,nMeses]);
+
+  var datosGastos=modoGraf==="promedio"?gastosProm:gastos;
+  var datosIngresos=modoGraf==="promedio"?ingresosProm:ingresos;
+
+  var selStyle={
+    backgroundColor:C.card,border:"1px solid "+C.br,color:C.tx,
+    borderRadius:6,padding:"3px 8px",fontSize:12
+  };
+
+  if(cargando)return(
+    <div style={{background:C.bg,height:"100vh",display:"flex",alignItems:"center",
+      justifyContent:"center",flexDirection:"column",gap:10}}>
+      <div style={{fontSize:28}}>&#9881;</div>
+      <div style={{color:C.tx,fontSize:16,fontWeight:700}}>Cargando datos...</div>
+      <div style={{color:C.sub,fontSize:12}}>Leyendo Google Sheets via Apps Script</div>
+    </div>
+  );
+
+  var tc=mesSel?mesSel.tc:0;
+
+  var TABS=mob?
+    [["resumen","Resumen"],["evolucion","Evolucion"],["comparativo","Comparativo"]]:
+    [["resumen","Resumen Mensual"],["evolucion","Evolucion Anual"],["comparativo","Comparativo"]];
+  var SUB_TABS_RESUMEN=mob?
+    [["movimientos","Movimientos"],["saldos","Saldos"]]:
+    [["movimientos","Movimientos"],["saldos","Saldos por Caja y Banco"]];
+
+  var topBar=(
+    <div style={{flexShrink:0,display:"flex",flexDirection:"column",gap:mob?4:6}}>
+      <div style={{display:"flex",alignItems:"center",gap:mob?6:12,flexWrap:mob?"wrap":"nowrap"}}>
+        {!mob&&<span style={{fontSize:17,fontWeight:800,color:C.tx,whiteSpace:"nowrap"}}>
+          Finanzas Dashboard
+        </span>}
+        <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid "+C.br,marginLeft:mob?0:4,flex:mob?1:undefined}}>
+          {TABS.map(function(t){
+            var active=tab===t[0];
+            return(
+              <button key={t[0]} onClick={function(){setTab(t[0]);}}
+                style={{flex:mob?1:undefined,padding:mob?"5px 0":"3px 14px",fontWeight:700,fontSize:mob?12:11,cursor:"pointer",
+                  border:"none",borderRight:"1px solid "+C.br,
+                  backgroundColor:active?C.ah:"transparent",
+                  color:active?"#fff":C.sub,whiteSpace:"nowrap"}}>
+                {t[1]}
+              </button>
+            );
+          })}
+        </div>
+        <span style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10,whiteSpace:"nowrap"}}>
+          {!mob&&<span style={{fontSize:11,color:error?C.eg:C.ing}}>
+            {error?"Error: "+error:"Conectado a Google Sheets"}
+          </span>}
+          {mob&&error&&<span style={{fontSize:10,color:C.eg}}>{error}</span>}
+        </span>
+      </div>
+
+      {/* Filtros - solo para resumen y evolucion */}
+      {tab!=="comparativo"&&<div style={{display:"flex",alignItems:"center",gap:mob?6:10,flexWrap:"wrap",
+        background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:mob?"4px 8px":"5px 12px"}}>
+        <span style={{fontSize:11,fontWeight:700,color:C.sub,letterSpacing:1}}>PERIODO</span>
+        <div style={{display:"flex",alignItems:"center",gap:5}}>
+          <span style={{fontSize:11,color:C.sub}}>Ano:</span>
+          <select style={selStyle} value={filtAno} onChange={function(e){
+            var nuevoAno=+e.target.value;
+            setFiltAno(nuevoAno);
+            /* Al cambiar año, mantener solo meses que existen en ese año */
+            var mesesNuevoAno=resumen.filter(function(r){return r.ano===nuevoAno;}).map(function(r){return r.mes;});
+            var mantener=filtMeses.filter(function(m){return mesesNuevoAno.indexOf(m)>=0;});
+            setFiltMeses(mantener.length>0?mantener:mesesNuevoAno.length>0?[mesesNuevoAno[mesesNuevoAno.length-1]]:[]);
+          }}>
+            {anosDisp.map(function(a){return <option key={a} value={a}>{a}</option>;})}
+          </select>
+        </div>
+
+        {/* Selector multi-mes solo en sub-tab movimientos */}
+        {tab==="resumen"&&subTabResumen==="saldos"&&(
+          <div style={{display:"flex",alignItems:"center",gap:5}}>
+            <span style={{fontSize:11,color:C.sub}}>Mes:</span>
+            <select style={selStyle} value={filtMesSaldo} onChange={function(e){setFiltMesSaldo(+e.target.value);}}>
+              {[1,2,3,4,5,6,7,8,9,10,11,12].filter(function(m){return mesesConDatos.indexOf(m)>=0;}).map(function(m){
+                return <option key={m} value={m}>{MNOM[m]}</option>;
+              })}
+            </select>
+          </div>
+        )}
+        {tab==="resumen"&&subTabResumen==="movimientos"&&(
+          <div style={{position:"relative"}}>
+            <button onClick={function(){setDropMesOpen(function(v){return !v;});}}
+              style={{backgroundColor:C.bg,border:"1px solid "+C.br,color:C.tx,
+                borderRadius:6,padding:"3px 10px",fontSize:11,cursor:"pointer",
+                display:"flex",alignItems:"center",gap:6,minWidth:120}}>
+              <span style={{flex:1,textAlign:"left"}}>
+                {filtMeses.length===0?"Sin meses":
+                 filtMeses.length===mesesConDatos.length?"Todos los meses":
+                 filtMeses.length===1?MNOM[filtMeses[0]]:
+                 filtMeses.length+" meses"}
+              </span>
+              <span style={{fontSize:9,color:C.sub}}>{dropMesOpen?"▲":"▼"}</span>
+            </button>
+            {dropMesOpen&&(
+              <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,zIndex:100,
+                background:C.card,border:"1px solid "+C.br,borderRadius:8,
+                padding:"6px 0",boxShadow:"0 8px 24px rgba(0,0,0,0.5)",minWidth:150}}>
+                {/* Todos / Ninguno */}
+                <div style={{display:"flex",gap:0,borderBottom:"1px solid "+C.br,marginBottom:4,padding:"0 8px 6px"}}>
+                  <button onClick={function(){setFiltMeses(mesesConDatos.slice());}}
+                    style={{flex:1,background:"transparent",border:"none",color:C.ah,
+                      fontSize:10,fontWeight:700,cursor:"pointer",padding:"2px 0"}}>
+                    Todos
+                  </button>
+                  <span style={{color:C.br}}>|</span>
+                  <button onClick={function(){setFiltMeses([]);}}
+                    style={{flex:1,background:"transparent",border:"none",color:C.sub,
+                      fontSize:10,fontWeight:700,cursor:"pointer",padding:"2px 0"}}>
+                    Ninguno
+                  </button>
+                </div>
+                {/* Lista de meses */}
+                {[1,2,3,4,5,6,7,8,9,10,11,12].map(function(m){
+                  var tieneDatos=mesesConDatos.indexOf(m)>=0;
+                  var marcado=filtMeses.indexOf(m)>=0;
+                  return(
+                    <div key={m}
+                      onClick={function(){
+                        if(!tieneDatos)return;
+                        setFiltMeses(function(prev){
+                          return marcado?prev.filter(function(x){return x!==m;}):prev.concat([m]);
+                        });
+                      }}
+                      style={{display:"flex",alignItems:"center",gap:8,padding:"4px 12px",
+                        cursor:tieneDatos?"pointer":"default",
+                        opacity:tieneDatos?1:0.35,
+                        background:marcado?"rgba(99,102,241,0.15)":"transparent"}}>
+                      <div style={{width:13,height:13,borderRadius:3,flexShrink:0,
+                        border:"1px solid "+(marcado?"#6366f1":C.br),
+                        backgroundColor:marcado?"#6366f1":"transparent",
+                        display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        {marcado&&<span style={{color:"#fff",fontSize:9,lineHeight:1}}>✓</span>}
+                      </div>
+                      <span style={{fontSize:11,color:tieneDatos?C.tx:C.sub,fontWeight:marcado?700:400}}>
+                        {MNOM[m]}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div style={{borderTop:"1px solid "+C.br,marginTop:4,padding:"6px 8px 2px"}}>
+                  <button onClick={function(){setDropMesOpen(false);}}
+                    style={{width:"100%",background:"#6366f1",border:"none",color:"#fff",
+                      borderRadius:5,padding:"4px 0",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                    Aplicar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <span style={{fontSize:12,color:C.ah,fontWeight:700}}>
+          {tab==="resumen"&&subTabResumen==="saldos"?MNOM[filtMesSaldo]+" "+filtAno:
+           tab==="resumen"?lblPeriodoSel:filtAno}
+          {tab==="resumen"&&subTabResumen==="movimientos"&&tc?" | TC: "+fARS(tc):""}
+        </span>
+        <div style={{marginLeft:"auto",display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid "+C.br}}>
+          {["ARS","USD"].map(function(m){return(
+            <button key={m} onClick={function(){setMon(m);}}
+              style={{padding:"3px 12px",fontWeight:700,fontSize:11,cursor:"pointer",
+                border:"none",backgroundColor:mon===m?C.ah:"transparent",
+                color:mon===m?"#fff":C.sub}}>
+              {m}
+            </button>
+          );})}
+        </div>
+        {/* Fecha ultimo movimiento — siempre visible en la barra de filtros */}
+        <span style={{fontSize:mob?10:11,color:C.sub,whiteSpace:"nowrap",
+          borderLeft:"1px solid "+C.br,paddingLeft:mob?6:10,marginLeft:mob?0:4}}>
+          Actualiz.: <span style={{color:C.ac,fontWeight:700}}>
+            {ultimaFecha||"—"}
+          </span>
+        </span>
+        <button onClick={function(){cargarResumen();}}
+          style={{backgroundColor:"transparent",border:"1px solid "+C.br,color:C.sub,
+            borderRadius:6,padding:"3px 10px",fontSize:11,cursor:"pointer"}}>
+          Recargar
+        </button>
+      </div>}
+    </div>
+  );
+
+  /* VISTA RESUMEN */
+  var vistaResumen=(
+    <div style={{display:"flex",flexDirection:"column",flex:1,gap:6,minHeight:0}}>
+      {/* Sub-tabs de Resumen Mensual */}
+      <div style={{flexShrink:0,display:"flex",alignItems:"center",gap:0,
+        borderRadius:7,overflow:"hidden",border:"1px solid "+C.br,alignSelf:"flex-start"}}>
+        {SUB_TABS_RESUMEN.map(function(st){
+          var act=subTabResumen===st[0];
+          return(
+            <button key={st[0]} onClick={function(){setSubTabResumen(st[0]);}}
+              style={{padding:"4px 16px",fontWeight:700,fontSize:11,cursor:"pointer",
+                border:"none",borderRight:"1px solid "+C.br,
+                backgroundColor:act?"#0891b2":"transparent",
+                color:act?"#fff":C.sub,whiteSpace:"nowrap"}}>
+              {st[1]}
+            </button>
+          );
+        })}
+      </div>
+
+      {subTabResumen==="movimientos"&&mesSel&&<div style={{display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(6,1fr)",gap:mob?5:8,flexShrink:0}}>
+        {[
+          {label:"Ingresos",val:USD?mesSel.ingUSD:mesSel.ingARS,color:C.ing,fmt:USD?fUSD:fARS},
+          {label:"Egresos",val:USD?Math.abs(mesSel.egUSD):Math.abs(mesSel.egARS),color:C.eg,fmt:USD?fUSD:fARS},
+          {label:"Ahorro",val:USD?mesSel.ahUSD:mesSel.ahARS,color:mesSel.ahARS>=0?C.ing:C.eg,fmt:USD?fUSD:fARS},
+          {label:"Ing. USD",val:mesSel.ingUSD,color:C.ing,fmt:fUSD},
+          {label:"Eg. USD",val:Math.abs(mesSel.egUSD),color:C.eg,fmt:fUSD}
+        ].map(function(k,i){return(
+          <div key={i} style={{background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:"6px 10px"}}>
+            <div style={{fontSize:10,color:C.sub,marginBottom:2}}>{k.label}</div>
+            <div style={{fontSize:13,fontWeight:700,color:k.color,lineHeight:1.2}}>{k.fmt(k.val)}</div>
+          </div>
+        );})}
+        {/* Semaforo salud financiera */}
+        <Semaforo pct={mesSel.pctAh*100} label={"Salud "+lblPeriodoSel}/>
+      </div>}
+      {/* Contenido de sub-tab MOVIMIENTOS */}
+      {subTabResumen==="movimientos"&&<div style={{display:"flex",flexDirection:"column",flex:1,gap:6,minHeight:0}}>
+        {/* Toggle Acumulado / Promedio + contador de meses */}
+        <div style={{flexShrink:0,display:"flex",alignItems:"center",gap:10}}>
+          <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid "+C.br}}>
+            {[["acumulado","Acumulado"],["promedio","Promedio mensual"]].map(function(m){
+              var act=modoGraf===m[0];
+              return(
+                <button key={m[0]} onClick={function(){setModoGraf(m[0]);}}
+                  style={{padding:"3px 12px",fontWeight:700,fontSize:11,cursor:"pointer",
+                    border:"none",backgroundColor:act?"#6366f1":"transparent",
+                    color:act?"#fff":C.sub}}>
+                  {m[1]}
+                </button>
+              );
+            })}
+          </div>
+          {nMeses>1&&(
+            <span style={{fontSize:11,color:C.sub}}>
+              sobre <span style={{color:C.ah,fontWeight:700}}>{nMeses} meses</span>
+            </span>
+          )}
+        </div>
+        {(function(){
+          var nFilas=Math.max(datosGastos.length, datosIngresos.length);
+          return(
+            <div style={{display:"flex",flexDirection:mob?"column":"row",gap:10,flex:mob?undefined:1,minHeight:mob?undefined:0}}>
+              <GrafConcepto datos={datosGastos} color={C.eg}
+                titulo={modoGraf==="promedio"?"Egresos — Prom. mensual":"Top Egresos"}
+                USD={USD} cargando={cargandoConc} nFilas={nFilas} mob={mob}/>
+              <GrafConcepto datos={datosIngresos} color={C.ing}
+                titulo={modoGraf==="promedio"?"Ingresos — Prom. mensual":"Top Ingresos"}
+                USD={USD} cargando={cargandoConc} nFilas={nFilas} mob={mob}/>
+            </div>
+          );
+        })()}
+      </div>}
+
+      {/* Contenido de sub-tab SALDOS */}
+      {subTabResumen==="saldos"&&(
+        <VistaSaldos
+          datos={saldosMes}
+          cargando={cargandoSaldos}
+          ano={filtAno}
+          mes={filtMesSaldo}
+          orden={ordenSaldos}
+          setOrden={setOrdenSaldos}
+          onRecargar={function(){cargarSaldos(filtAno,filtMesSaldo);}}
+        />
+      )}
+    </div>
+  );
+
+  return(
+    <div style={{background:C.bg,color:C.tx,
+      height:mob?"auto":"100vh",
+      minHeight:mob?"100vh":"auto",
+      display:"flex",flexDirection:"column",
+      padding:mob?"6px 8px":"8px 14px",
+      gap:mob?4:6,
+      overflow:mob?"visible":"hidden"}}>
+      {/* Overlay para cerrar dropdown de meses al hacer click fuera */}
+      {dropMesOpen&&<div onClick={function(){setDropMesOpen(false);}}
+        style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:99}}/>}
+      {topBar}
+      {tab==="resumen"&&vistaResumen}
+      {tab==="evolucion"&&<GrafEvolucion resumen={resumen} filtAno={filtAno} USD={USD} mob={mob}/>}
+      {tab==="comparativo"&&<Comparativo resumen={resumen} anosDisp={anosDisp} USD={USD} mon={mon} setMon={setMon} onRecargar={cargarResumen} mob={mob} ultimaFecha={ultimaFecha}/>}
+    </div>
+  );
+}
+
+/* ================================================================
+   VISTA SALDOS POR CAJA Y BANCO
+   Muestra 2 paneles: Panel A (ARS) y Panel B (USD)
+   Cada panel: SubTotal No-Inversiones, filas inv, SubTotal Inversiones, Total General
+   ================================================================ */
+function VistaSaldos(props){
+  var datos=props.datos, cargando=props.cargando, ano=props.ano, mes=props.mes;
+  var orden=props.orden, setOrden=props.setOrden, onRecargar=props.onRecargar;
+  var mob=useIsMobile();
+
+  /* Checkbox ocultar saldo cero — activo por default */
+  var [ocultarCero,setOcultarCero]=useState(true);
+
+  /* Clasificar cada fila — usa esInv calculado en el backend desde
+     MEDIOS_PAGO.TIPO ("Inversion"/"Bono") y CAJAS_BANCOS.GRUPO ("INVERSIONES").
+     Sin hardcodeo en el frontend: si cambia la planilla, cambia automáticamente. */
+  var filas=useMemo(function(){
+    if(!datos||datos.length===0)return[];
+    return datos.slice(); /* esInv ya viene calculado correctamente desde el servidor */
+  },[datos]);
+
+  /* Ordenar según criterio elegido — panel A ordena por ARS, panel B por USD */
+  function aplicarOrden(arr,campo,isML){
+    var copia=arr.slice();
+    if(campo==="mpOrden") copia.sort(function(a,b){
+      /* Orden del Access: por MEDIOS_PAGO.ORDEN, luego descripción MP, luego descripción CB */
+      if(a.mpOrden!==b.mpOrden) return a.mpOrden-b.mpOrden;
+      if(a.mp!==b.mp) return a.mp<b.mp?-1:1;
+      return a.cb<b.cb?-1:a.cb>b.cb?1:0;
+    });
+    else if(campo==="mp") copia.sort(function(a,b){return a.mp<b.mp?-1:a.mp>b.mp?1:0;});
+    else if(campo==="cb") copia.sort(function(a,b){return a.cb<b.cb?-1:a.cb>b.cb?1:0;});
+    else if(campo==="saldo_desc") copia.sort(function(a,b){
+      return isML ? Math.abs(b.finML)-Math.abs(a.finML) : Math.abs(b.finME)-Math.abs(a.finME);
+    });
+    else if(campo==="saldo_asc") copia.sort(function(a,b){
+      return isML ? Math.abs(a.finML)-Math.abs(b.finML) : Math.abs(a.finME)-Math.abs(b.finME);
+    });
+    return copia;
+  }
+
+  var noInvBase=useMemo(function(){return filas.filter(function(f){return !f.esInv;});},[filas]);
+  var invBase  =useMemo(function(){return filas.filter(function(f){return f.esInv;});},[filas]);
+
+  function sum(arr,campo){return arr.reduce(function(s,r){return s+(r[campo]||0);},0);}
+
+  /* Totales calculados sobre base completa (sin filtro de orden ni de cero) */
+  var totNoInvIniML=sum(noInvBase,"iniML"), totNoInvPerML=sum(noInvBase,"perML"), totNoInvFinML=sum(noInvBase,"finML");
+  var totInvIniML =sum(invBase,"iniML"),    totInvPerML =sum(invBase,"perML"),    totInvFinML =sum(invBase,"finML");
+  var totGenIniML =totNoInvIniML+totInvIniML, totGenPerML=totNoInvPerML+totInvPerML, totGenFinML=totNoInvFinML+totInvFinML;
+
+  var totNoInvIniME=sum(noInvBase,"iniME"), totNoInvPerME=sum(noInvBase,"perME"), totNoInvFinME=sum(noInvBase,"finME");
+  var totInvIniME =sum(invBase,"iniME"),    totInvPerME =sum(invBase,"perME"),    totInvFinME =sum(invBase,"finME");
+  var totGenIniME =totNoInvIniME+totInvIniME, totGenPerME=totNoInvPerME+totInvPerME, totGenFinME=totNoInvFinME+totInvFinME;
+
+  var selStyle={
+    backgroundColor:C.card,border:"1px solid "+C.br,color:C.tx,
+    borderRadius:6,padding:"3px 8px",fontSize:11
+  };
+
+  var ORDEN_OPTS=[
+    {val:"mpOrden",   lbl:"Por Nro. Orden"},
+    {val:"mp",        lbl:"Por Medio de Cobro/Pago"},
+    {val:"cb",        lbl:"Por Caja y Banco"},
+    {val:"saldo_desc",lbl:"Saldo $ desc."},
+    {val:"saldo_asc", lbl:"Saldo $ asc."}
+  ];
+
+  if(cargando)return(
+    <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",
+      color:C.sub,fontSize:13}}>
+      Cargando saldos...
+    </div>
+  );
+
+  if(!datos||datos.length===0)return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10,
+      color:C.sub,fontSize:13}}>
+      <div>Sin datos de saldos para {MNOM[mes]} {ano}</div>
+      <button onClick={onRecargar}
+        style={{backgroundColor:C.ah,border:"none",color:"#fff",borderRadius:6,padding:"6px 18px",fontSize:12,cursor:"pointer",fontWeight:700}}>
+        Cargar Saldos
+      </button>
+    </div>
+  );
+
+  /* Fila de tabla de saldo */
+  function FilaSaldo(fp){
+    var r=fp.r, isML=fp.isML, isTotal=fp.isTotal, isSubtotal=fp.isSubtotal, totGen=fp.totGen;
+    var ini=isML?r.iniML:r.iniME;
+    var per=isML?r.perML:r.perME;
+    var fin=isML?r.finML:r.finME;
+    var fmt=isML?fARS:fUSD;
+    var bgRow=isTotal?"rgba(99,102,241,0.18)":isSubtotal?"rgba(99,102,241,0.08)":"transparent";
+    var fw=isTotal||isSubtotal?700:600;
+    var colFin=fin>0?C.ing:fin<0?C.eg:C.sub;
+    var colPer=per>0?C.ing:per<0?C.eg:C.sub;
+    /* % sobre total general — solo en filas de dato y subtotales */
+    var pct=null;
+    if(!isTotal && totGen && Math.abs(totGen)>0.001) pct=fin/totGen*100;
+    var pctStr=pct===null?"-":(Math.abs(pct)<0.05?"~0":pct.toFixed(1))+"%";
+    var colPct=pct===null?C.sub:pct>0?"#f59e0b":pct<0?C.eg:C.sub;
+    return(
+      <tr className="tbl-row" style={{borderBottom:"1px solid rgba(51,65,85,0.4)",background:bgRow}}>
+        {isTotal||isSubtotal?(
+          <td colSpan={2} style={{padding:"5px 8px",fontSize:12,fontWeight:fw,color:C.tx,whiteSpace:"nowrap"}}>
+            {r.label}
+          </td>
+        ):(
+          <>
+            <td style={{padding:"4px 8px",fontSize:12,color:C.tx,whiteSpace:"nowrap",maxWidth:140,overflow:"hidden",textOverflow:"ellipsis"}}>{r.mp}</td>
+            <td style={{padding:"4px 8px",fontSize:12,color:C.sub,whiteSpace:"nowrap",maxWidth:150,overflow:"hidden",textOverflow:"ellipsis"}}>{r.cb}</td>
+          </>
+        )}
+        <td style={{padding:"4px 8px",textAlign:"right",fontSize:12,color:C.sub,fontWeight:fw,whiteSpace:"nowrap"}}>{Math.abs(ini)>0.001?fmt(ini):"-"}</td>
+        <td style={{padding:"4px 8px",textAlign:"right",fontSize:12,color:colPer,fontWeight:fw,whiteSpace:"nowrap"}}>{per!==0?fmt(per):"-"}</td>
+        <td style={{padding:"4px 8px",textAlign:"right",fontSize:12,color:colFin,fontWeight:isTotal?800:700,whiteSpace:"nowrap"}}>{fmt(fin)}</td>
+        <td style={{padding:"4px 8px",textAlign:"right",fontSize:12,color:colPct,fontWeight:isTotal?800:700,whiteSpace:"nowrap"}}>{pctStr}</td>
+      </tr>
+    );
+  }
+
+  function PanelSaldo(pp){
+    var isML=pp.isML;
+    var titulo=isML?"Panel A — Saldos en $":"Panel B — Saldos en USD";
+    var color=isML?C.ing:"#60a5fa";
+    var totGenFin=isML?totGenFinML:totGenFinME;
+    var campoFin=isML?"finML":"finME";
+    var umbral=isML?0.01:0.00001;
+
+    /* Siempre mantener separación no-inv / inv con subtotales.
+       El orden elegido aplica dentro de cada grupo. */
+    var noInv=aplicarOrden(noInvBase,orden,isML);
+    var inv  =aplicarOrden(invBase,  orden,isML);
+    if(ocultarCero){
+      noInv=noInv.filter(function(f){return Math.abs(f[campoFin])>=umbral;});
+      inv  =inv.filter(  function(f){return Math.abs(f[campoFin])>=umbral;});
+    }
+
+    var thStyle={textAlign:"right",padding:"5px 8px",color:C.sub,fontWeight:700,fontSize:11,
+      position:"sticky",top:0,background:C.card,whiteSpace:"nowrap"};
+    var thStyleL={textAlign:"left",padding:"5px 8px",color:C.sub,fontWeight:700,fontSize:11,
+      position:"sticky",top:0,background:C.card,whiteSpace:"nowrap"};
+
+    return(
+      <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+        padding:"10px 12px",display:"flex",flexDirection:"column",minHeight:mob?undefined:0}}>
+        <div style={{fontSize:12,fontWeight:700,color:color,marginBottom:6,flexShrink:0}}>
+          {titulo}
+          <span style={{fontSize:10,color:C.sub,fontWeight:400,marginLeft:6}}>
+            Saldo al cierre de {MNOM[mes]} {ano}
+          </span>
+        </div>
+        <div style={{flex:mob?undefined:1,overflowY:mob?"visible":"auto",overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:mob?11:12,minWidth:mob?500:undefined}}>
+            <thead>
+              <tr style={{borderBottom:"2px solid "+C.br}}>
+                <th style={thStyleL}>Medio Cobro/Pago</th>
+                <th style={thStyleL}>Caja / Banco</th>
+                <th style={thStyle}>Saldo Inicial</th>
+                <th style={thStyle}>Total Período</th>
+                <th style={thStyle}>Saldo Final</th>
+                <th style={Object.assign({},thStyle,{color:"#f59e0b"})}>%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* No-inversiones — ordenadas según criterio elegido */}
+              {noInv.map(function(r,i){return <FilaSaldo key={i} r={r} isML={isML} totGen={totGenFin}/>;}) }
+              <FilaSaldo isSubtotal={true} r={{
+                label:"SubTotal No-Inversiones",
+                iniML:totNoInvIniML,perML:totNoInvPerML,finML:totNoInvFinML,
+                iniME:totNoInvIniME,perME:totNoInvPerME,finME:totNoInvFinME
+              }} isML={isML} totGen={totGenFin}/>
+              {/* Inversiones — ordenadas según criterio elegido */}
+              {invBase.length>0&&<tr><td colSpan={6} style={{padding:"6px 8px 2px",fontSize:10,fontWeight:700,
+                color:"#f59e0b",textTransform:"uppercase",letterSpacing:"0.5px",background:"rgba(245,158,11,0.06)"}}>
+                Inversiones
+              </td></tr>}
+              {inv.map(function(r,i){return <FilaSaldo key={"inv"+i} r={r} isML={isML} totGen={totGenFin}/>;}) }
+              {invBase.length>0&&<FilaSaldo isSubtotal={true} r={{
+                label:"SubTotal Inversiones",
+                iniML:totInvIniML,perML:totInvPerML,finML:totInvFinML,
+                iniME:totInvIniME,perME:totInvPerME,finME:totInvFinME
+              }} isML={isML} totGen={totGenFin}/>}
+              {/* Total general */}
+              <FilaSaldo isTotal={true} r={{
+                label:"TOTAL GENERAL",
+                iniML:totGenIniML,perML:totGenPerML,finML:totGenFinML,
+                iniME:totGenIniME,perME:totGenPerME,finME:totGenFinME
+              }} isML={isML}/>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",flex:mob?undefined:1,gap:8,minHeight:mob?undefined:0}}>
+      {/* Barra de controles */}
+      <div style={{flexShrink:0,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",
+        background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:mob?"4px 8px":"5px 12px"}}>
+        <span style={{fontSize:11,fontWeight:700,color:C.sub,letterSpacing:1}}>ORDEN</span>
+        <select style={selStyle} value={orden} onChange={function(e){setOrden(e.target.value);}}>
+          {ORDEN_OPTS.map(function(o){return <option key={o.val} value={o.val}>{o.lbl}</option>;})}
+        </select>
+        {/* Checkbox ocultar saldo cero */}
+        <label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",userSelect:"none"}}>
+          <input type="checkbox" checked={ocultarCero}
+            onChange={function(e){setOcultarCero(e.target.checked);}}
+            style={{cursor:"pointer",accentColor:C.ah,width:13,height:13}}/>
+          <span style={{fontSize:11,color:C.sub}}>Ocultar saldo 0</span>
+        </label>
+        {!mob&&<span style={{fontSize:12,color:C.ah,fontWeight:700,marginLeft:4}}>
+          {MNOM[mes]} {ano} — {filas.length} registros ({noInvBase.length} corrientes + {invBase.length} inv.)
+        </span>}
+        <button onClick={onRecargar}
+          style={{marginLeft:"auto",backgroundColor:"transparent",border:"1px solid "+C.br,color:C.sub,
+            borderRadius:6,padding:"3px 10px",fontSize:11,cursor:"pointer"}}>
+          Recargar
+        </button>
+      </div>
+      {/* Paneles A y B — apilados en mobile, lado a lado en desktop */}
+      <div style={{display:"flex",flexDirection:mob?"column":"row",gap:10,flex:mob?undefined:1,minHeight:mob?undefined:0}}>
+        <PanelSaldo isML={true}/>
+        <PanelSaldo isML={false}/>
+      </div>
+    </div>
+  );
+}
+
+/* SEMAFORO DE SALUD FINANCIERA */
+function Semaforo(props){
+  var pct=props.pct, label=props.label, grande=props.grande;
+  var col=pct>20?"#22c55e":pct>=0?"#f59e0b":"#ef4444";
+  var ico=pct>20?"●":"●";
+  var txt=pct>20?"Excelente":pct>=0?"Moderado":"Negativo";
+  return(
+    <div style={{background:C.card,border:"2px solid "+col,borderRadius:grande?10:8,
+      padding:grande?"10px 14px":"6px 10px",display:"flex",flexDirection:"column",
+      justifyContent:"space-between",position:"relative",overflow:"hidden"}}>
+      {/* Glow de fondo */}
+      <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,
+        background:"radial-gradient(ellipse at top left, "+col+"22 0%, transparent 70%)",
+        pointerEvents:"none"}}/>
+      <div style={{fontSize:grande?11:10,color:C.sub,marginBottom:grande?6:2,position:"relative"}}>
+        {label}
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8,position:"relative"}}>
+        <div style={{width:grande?18:14,height:grande?18:14,borderRadius:"50%",
+          backgroundColor:col,boxShadow:"0 0 10px "+col,flexShrink:0}}/>
+        <div>
+          <div style={{fontSize:grande?16:13,fontWeight:800,color:col,lineHeight:1}}>{txt}</div>
+          <div style={{fontSize:10,color:C.sub,marginTop:1}}>{pct.toFixed(1)}% ahorro</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* GRAFICO HORIZONTAL CONCEPTOS
+   - Ambos graficos usan el mismo layout: nombres izquierda, barras crecen →
+   - Escala compartida via prop maxVal para que las barras sean comparables
+   - Labels: dentro de la barra si es ancha, fuera (derecha) si es angosta
+*/
+function GrafConcepto(props){
+  var datos=props.datos, color=props.color, USD=props.USD, nFilas=props.nFilas, mob=props.mob;
+
+  var datosAbs=useMemo(function(){
+    var arr=(datos||[]).map(function(d){
+      return Object.assign({},d,{valAbs:Math.abs(d.val)});
+    });
+    /* Rellenar con filas vacías hasta nFilas para alinear verticalmente con el otro gráfico */
+    if(nFilas&&arr.length<nFilas){
+      for(var i=arr.length;i<nFilas;i++){
+        arr.push({conc:"",valAbs:0,pct:0,tipo:"",val:0,_vacio:true});
+      }
+    }
+    return arr;
+  },[datos,nFilas]);
+
+  if(props.cargando)return(
+    <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+      display:"flex",alignItems:"center",justifyContent:"center",color:C.sub,fontSize:12}}>
+      Cargando conceptos...
+    </div>
+  );
+  if(!datosAbs||datosAbs.length===0)return(
+    <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+      display:"flex",alignItems:"center",justifyContent:"center",color:C.sub,fontSize:12}}>
+      Sin datos
+    </div>
+  );
+
+  /* UMBRAL: si la barra tiene >= 110px → label DENTRO (blanco, desde x+6)
+             si la barra tiene < 110px  → label FUERA  (color suave, desde x+width+5)
+             Filas vacías de relleno (_vacio): no mostrar nada */
+  function LblBar(p){
+    var x=p.x, y=p.y, width=p.width, height=p.height, index=p.index;
+    if(height<14)return null;
+    var d=datosAbs[index];
+    if(!d||d._vacio||!d.conc)return null; /* suprimir filas vacías */
+    var importe=USD?fUSD(d.valAbs):fARS(d.valAbs);
+    var pctStr="("+d.pct.toFixed(1)+"%)";
+    var texto=importe+"  "+pctStr;
+    if(width>=110){
+      return(
+        <text x={x+6} y={y+height/2}
+          fill="rgba(255,255,255,0.93)" fontSize={11}
+          dominantBaseline="middle" fontWeight={700} textAnchor="start">
+          {texto}
+        </text>
+      );
+    } else {
+      return(
+        <text x={x+width+5} y={y+height/2}
+          fill={C.tx} fontSize={11}
+          dominantBaseline="middle" fontWeight={600} textAnchor="start">
+          {texto}
+        </text>
+      );
+    }
+  }
+
+  var BAR_H=mob?24:28;
+  var nConceptos=(datos||[]).length; /* solo los reales, sin vacíos */
+  /* En mobile no rellenamos filas vacías — usamos solo los datos reales */
+  var datosChart=mob?datosAbs.filter(function(d){return !d._vacio;}):datosAbs;
+  var chartH=datosChart.length*BAR_H+24;
+  var yAxisW=mob?110:138;
+  /* Escala propia: máximo de los datos reales + 5% de margen para que la barra más larga
+     no llegue al borde y haya espacio para el label externo si hace falta */
+  var maxProp=(datos||[]).reduce(function(m,d){return Math.max(m,Math.abs(d.val));},0);
+  var domain=maxProp>0?[0,maxProp*1.45]:undefined; /* 45% extra = espacio para labels externos */
+  var rightMargin=8;
+
+  return(
+    <div style={{flex:mob?undefined:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+      padding:"10px 12px",display:"flex",flexDirection:"column",minWidth:0,minHeight:mob?undefined:0}}>
+      <div style={{fontSize:12,fontWeight:700,color:C.tx,marginBottom:6,flexShrink:0}}>
+        {props.titulo}
+        <span style={{fontSize:10,color:C.sub,fontWeight:400,marginLeft:6}}>{nConceptos} conceptos</span>
+      </div>
+      <div style={{flex:mob?undefined:1,overflowY:mob?"visible":"auto",overflowX:"hidden",height:mob?chartH+"px":undefined}}>
+        <div style={{height:chartH+"px",minHeight:mob?undefined:"100%"}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={datosChart} layout="vertical"
+              margin={{top:2,right:rightMargin,bottom:2,left:4}}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.br} horizontal={false}/>
+              <XAxis type="number" domain={domain}
+                tick={{fill:C.sub,fontSize:9}}
+                tickFormatter={function(v){return fK(v,USD);}}/>
+              <YAxis type="category" dataKey="conc" width={yAxisW}
+                tick={{fill:C.tx,fontSize:10}} tickLine={false}/>
+              <Tooltip content={function(p){
+                /* No mostrar tooltip para filas vacias */
+                if(!p.active||!p.payload||!p.payload.length)return null;
+                var d=p.payload[0].payload;
+                if(d._vacio||!d.conc)return null;
+                return(
+                  <div style={{background:"#1e2d3d",border:"1px solid "+C.br,borderRadius:8,
+                    padding:"8px 12px",fontSize:12,boxShadow:"0 4px 12px rgba(0,0,0,0.5)"}}>
+                    <div style={{fontWeight:700,color:C.tx,marginBottom:4}}>{d.conc}</div>
+                    <div style={{color:color,fontWeight:600}}>{USD?fUSD(d.valAbs):fARS(d.valAbs)}</div>
+                    <div style={{color:C.sub}}>{d.pct.toFixed(1)}% del total</div>
+                  </div>
+                );
+              }} cursor={{fill:"rgba(255,255,255,0.04)"}}/>
+              <Bar dataKey="valAbs" barSize={BAR_H-4}
+                radius={[0,3,3,0]}
+                label={<LblBar/>} isAnimationActive={false}>
+                {datosAbs.map(function(d,i){
+                  /* Filas vacías: sin color (transparente) */
+                  return <Cell key={i} fill={d._vacio?"transparent":PAL[i%PAL.length]}/>;
+                })}</Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* EVOLUCION ANUAL */
+function GrafEvolucion(props){
+  var resumen=props.resumen,filtAno=props.filtAno,USD=props.USD,mob=props.mob;
+  var datos=useMemo(function(){
+    return resumen.filter(function(r){return r.ano===filtAno;})
+      .sort(function(a,b){return a.mes-b.mes;})
+      .map(function(r){
+        return{mes:MNOM[r.mes],ing:USD?r.ingUSD:r.ingARS,
+          eg:USD?Math.abs(r.egUSD):Math.abs(r.egARS),ah:USD?r.ahUSD:r.ahARS};
+      });
+  },[resumen,filtAno,USD]);
+
+  if(!datos||datos.length===0)return(
+    <div style={{flex:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+      display:"flex",alignItems:"center",justifyContent:"center",color:C.sub,fontSize:13}}>
+      Sin datos para {filtAno}
+    </div>
+  );
+
+  var datosConAcum=useMemo(function(){
+    var acum=0;
+    return datos.map(function(d){acum+=d.ah;return Object.assign({},d,{acum:acum});});
+  },[datos]);
+
+  var totIng=datos.reduce(function(s,d){return s+d.ing;},0);
+  var totEg=datos.reduce(function(s,d){return s+d.eg;},0);
+  var totAh=datos.reduce(function(s,d){return s+d.ah;},0);
+  var fmt=USD?fUSD:fARS;
+
+  function TipEv(p){
+    if(!p.active||!p.payload||!p.payload.length)return null;
+    return(
+      <div style={{background:"#1e2d3d",border:"1px solid "+C.br,borderRadius:8,
+        padding:"10px 14px",fontSize:12,boxShadow:"0 4px 16px rgba(0,0,0,0.6)"}}>
+        <div style={{fontWeight:800,color:C.tx,marginBottom:6,fontSize:13}}>{p.label}</div>
+        {p.payload.map(function(e,i){
+          return <div key={i} style={{color:e.color,fontWeight:600,marginBottom:2}}>{e.name}: {fmt(Math.abs(e.value))}</div>;
+        })}
+      </div>
+    );
+  }
+
+  /* Semaforos por mes */
+  var semaforos=useMemo(function(){
+    return resumen.filter(function(r){return r.ano===filtAno;})
+      .sort(function(a,b){return a.mes-b.mes;})
+      .map(function(r){return{mes:MNOM[r.mes],pct:r.pctAh*100};});
+  },[resumen,filtAno]);
+
+  return(
+    <div style={{flex:mob?undefined:1,display:"flex",flexDirection:"column",gap:10,minHeight:mob?undefined:0}}>
+      {/* KPIs anuales + semaforo anual */}
+      <div style={{display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(5,1fr)",gap:mob?5:10,flexShrink:0}}>
+        {[
+          {label:"Total Ingresos "+filtAno,val:totIng,color:C.ing},
+          {label:"Total Egresos "+filtAno,val:totEg,color:C.eg},
+          {label:"Ahorro Neto "+filtAno,val:totAh,color:totAh>=0?C.ing:C.eg}
+        ].map(function(k,i){return(
+          <div key={i} style={{background:C.card,border:"1px solid "+C.br,borderRadius:10,padding:"10px 14px"}}>
+            <div style={{fontSize:11,color:C.sub,marginBottom:4}}>{k.label}</div>
+            <div style={{fontSize:18,fontWeight:800,color:k.color}}>{fmt(Math.abs(k.val))}</div>
+          </div>
+        );})}
+        <Semaforo pct={totIng>0?(totAh/totIng*100):0} label={"Salud "+filtAno} grande={true}/>
+        {/* Fila de semaforos mensuales */}
+        <div style={{background:C.card,border:"1px solid "+C.br,borderRadius:10,padding:"8px 10px",
+          display:"flex",flexDirection:"column",justifyContent:"center"}}>
+          <div style={{fontSize:10,color:C.sub,marginBottom:5}}>Salud por mes</div>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+            {semaforos.map(function(s,i){
+              var col=s.pct>20?"#22c55e":s.pct>=0?"#f59e0b":"#ef4444";
+              return(
+                <div key={i} title={s.mes+": "+s.pct.toFixed(1)+"%"}
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
+                  <div style={{width:10,height:10,borderRadius:"50%",backgroundColor:col,
+                    boxShadow:"0 0 6px "+col}}/>
+                  <span style={{fontSize:7,color:C.sub}}>{s.mes}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Grafico */}
+      <div style={{flex:mob?undefined:1,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+        padding:"14px 16px",display:"flex",flexDirection:"column",minHeight:mob?undefined:0,
+        height:mob?"320px":undefined}}>
+        <div style={{fontSize:13,fontWeight:700,color:C.tx,marginBottom:8,flexShrink:0}}>
+          Ingresos, Egresos y Ahorro por mes
+          <span style={{fontSize:11,color:C.sub,fontWeight:400,marginLeft:8}}>{USD?"USD":"ARS"}</span>
+        </div>
+        <div style={{flex:1,minHeight:0}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={datosConAcum} margin={{top:8,right:30,bottom:8,left:20}}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.br}/>
+              <XAxis dataKey="mes" tick={{fill:C.tx,fontSize:12}} tickLine={false}/>
+              <YAxis yAxisId="left" tick={{fill:C.sub,fontSize:10}} tickFormatter={function(v){return fK(v,USD);}} width={65}/>
+              <YAxis yAxisId="right" orientation="right" tick={{fill:C.sub,fontSize:10}} tickFormatter={function(v){return fK(v,USD);}} width={65}/>
+              <Tooltip content={<TipEv/>}/>
+              <Legend wrapperStyle={{color:C.sub,fontSize:12,paddingTop:8}}/>
+              <ReferenceLine yAxisId="left" y={0} stroke={C.br} strokeWidth={1}/>
+              <Bar yAxisId="left" dataKey="ing" name="Ingresos" fill={C.ing} opacity={0.85} radius={[4,4,0,0]} barSize={22}/>
+              <Bar yAxisId="left" dataKey="eg"  name="Egresos"  fill={C.eg}  opacity={0.85} radius={[4,4,0,0]} barSize={22}/>
+              <Bar yAxisId="left" dataKey="ah"  name="Ahorro"   fill={C.ah}  opacity={0.9}  radius={[4,4,0,0]} barSize={22}/>
+              <Line yAxisId="right" dataKey="acum" name="Ahorro Acumulado" stroke={C.ac} strokeWidth={2}
+                strokeDasharray="6 3" dot={{r:4,fill:C.ac}} activeDot={{r:6}}/>
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   COMPARATIVO
+   ================================================================ */
+function Comparativo(props){
+  var resumen=props.resumen, anosDisp=props.anosDisp, USD=props.USD, mon=props.mon, setMon=props.setMon, mob=props.mob, ultimaFecha=props.ultimaFecha;
+  var hoy=new Date();
+  var anoActual=hoy.getFullYear();
+  var mesActual=hoy.getMonth()+1;
+
+  /* Modo: "mes" o "ano" */
+  var [modo,setModo]=useState("mes");
+
+  /* Periodo A y B */
+  var mesPrevio=mesActual===1?12:mesActual-1;
+  var anoPrevio=mesActual===1?anoActual-1:anoActual;
+  var [pA,setPA]=useState({ano:anoActual,mes:mesActual});
+  var [pB,setPB]=useState({ano:anoPrevio,mes:mesPrevio});
+  var [anoA,setAnoA]=useState(anoActual);
+  var [anoB,setAnoB]=useState(anoActual>1?(anoActual-1):anoActual);
+
+  /* Cache de conceptos ya cargados: key "ano-mes" */
+  var [concCache,setConcCache]=useState({});
+  var [cargComp,setCargComp]=useState(false);
+
+  /* Cargar conceptos necesarios */
+  function necesitarConc(ano,mes){
+    var k=ano+"-"+mes;
+    if(concCache[k])return Promise.resolve(concCache[k]);
+    return fetchProxy({req:"conceptos",ano:ano,mes:mes})
+      .then(function(d){
+        setConcCache(function(prev){var n=Object.assign({},prev);n[k]=d;return n;});
+        return d;
+      });
+  }
+
+  useEffect(function(){
+    if(modo==="mes"){
+      setCargComp(true);
+      Promise.all([necesitarConc(pA.ano,pA.mes),necesitarConc(pB.ano,pB.mes)])
+        .then(function(){setCargComp(false);})
+        .catch(function(){setCargComp(false);});
+    }
+  },[modo,pA.ano,pA.mes,pB.ano,pB.mes]);
+
+  /* Datos A y B para modo mes */
+  var datosA=concCache[pA.ano+"-"+pA.mes]||[];
+  var datosB=concCache[pB.ano+"-"+pB.mes]||[];
+
+  /* Para modo ano: agregar movimientos del ano del resumen */
+  var resA=useMemo(function(){
+    return resumen.filter(function(r){return r.ano===anoA;});
+  },[resumen,anoA]);
+  var resB=useMemo(function(){
+    return resumen.filter(function(r){return r.ano===anoB;});
+  },[resumen,anoB]);
+
+  function sumarResumen(lista){
+    return lista.reduce(function(acc,r){
+      return{
+        ingARS:acc.ingARS+(r.ingARS||0),
+        egARS:acc.egARS+(r.egARS||0),
+        ahARS:acc.ahARS+(r.ahARS||0),
+        ingUSD:acc.ingUSD+(r.ingUSD||0),
+        egUSD:acc.egUSD+(r.egUSD||0),
+        ahUSD:acc.ahUSD+(r.ahUSD||0)
+      };
+    },{ingARS:0,egARS:0,ahARS:0,ingUSD:0,egUSD:0,ahUSD:0});
+  }
+
+  var totA=sumarResumen(resA);
+  var totB=sumarResumen(resB);
+
+  /* Etiqueta de periodo */
+  function lblPeriodo(p){return MNOM[p.mes]+" "+p.ano;}
+
+  /* Construir tabla comparativa de conceptos (modo mes) */
+  var tablaConceptos=useMemo(function(){
+    var todos={};
+    datosA.forEach(function(c){
+      todos[c.conc]={conc:c.conc,tipo:c.tipo,vA:USD?c.usd:c.ars,vB:0};
+    });
+    datosB.forEach(function(c){
+      var k=c.conc;
+      if(todos[k]){todos[k].vB=USD?c.usd:c.ars;}
+      else{todos[k]={conc:k,tipo:c.tipo,vA:0,vB:USD?c.usd:c.ars};}
+    });
+    return Object.values(todos).map(function(r){
+      /* Trabajar SIEMPRE con magnitudes absolutas para comparar cuanto cambio el importe.
+         Los gastos llegan con signo negativo del proxy, lo que invertia la logica de color.
+         dif>0 = el importe del concepto subio en periodo A vs B (siempre en magnitud) */
+      var mA=Math.abs(r.vA), mB=Math.abs(r.vB);
+      var dif=mA-mB;
+      var pct, esNuevo=false, esDesap=false;
+      if(mB>0.5){
+        pct=dif/mB*100;
+      } else if(mA>0.5){
+        pct=100; esNuevo=true;
+      } else {
+        pct=0;
+      }
+      if(mA<0.5&&mB>0.5){ pct=-100; esDesap=true; }
+      return Object.assign({},r,{dif:dif,pct:pct,esNuevo:esNuevo,esDesap:esDesap});
+    });
+  },[datosA,datosB,USD]);
+
+  var gastosCmp=useMemo(function(){
+    return tablaConceptos.filter(function(r){return r.tipo==="Gasto";})
+      .sort(function(a,b){return Math.abs(b.vA)-Math.abs(a.vA);});
+  },[tablaConceptos]);
+
+  var ingresosCmp=useMemo(function(){
+    return tablaConceptos.filter(function(r){return r.tipo==="Ingreso";})
+      .sort(function(a,b){return Math.abs(b.vA)-Math.abs(a.vA);});
+  },[tablaConceptos]);
+
+  /* Analisis IA (logica deterministica) */
+  var analisis=useMemo(function(){
+    if(modo==="mes"){
+      return generarAnalisisMes(tablaConceptos,pA,pB,USD);
+    } else {
+      return generarAnalisisAno(resA,resB,anoA,anoB,USD);
+    }
+  },[tablaConceptos,resA,resB,modo,pA,pB,anoA,anoB,USD]);
+
+  var fmt=USD?fUSD:fARS;
+
+  var selStyle={
+    backgroundColor:C.card,border:"1px solid "+C.br,color:C.tx,
+    borderRadius:6,padding:"3px 8px",fontSize:12
+  };
+
+  /* KPIs comparativos para modo mes */
+  var kpiA=useMemo(function(){
+    var ing=datosA.filter(function(c){return c.tipo==="Ingreso";}).reduce(function(s,c){return s+Math.abs(USD?c.usd:c.ars);},0);
+    var eg=datosA.filter(function(c){return c.tipo==="Gasto";}).reduce(function(s,c){return s+Math.abs(USD?c.usd:c.ars);},0);
+    return{ing:ing,eg:eg,ah:ing-eg};
+  },[datosA,USD]);
+
+  var kpiB=useMemo(function(){
+    var ing=datosB.filter(function(c){return c.tipo==="Ingreso";}).reduce(function(s,c){return s+Math.abs(USD?c.usd:c.ars);},0);
+    var eg=datosB.filter(function(c){return c.tipo==="Gasto";}).reduce(function(s,c){return s+Math.abs(USD?c.usd:c.ars);},0);
+    return{ing:ing,eg:eg,ah:ing-eg};
+  },[datosB,USD]);
+
+  /* Color e icono segun tipo y sentido:
+     Gasto sube (dif>0) → rojo ▲ mala noticia
+     Gasto baja (dif<0) → verde ▼ buena noticia
+     Ingreso sube (dif>0) → verde ▲ buena noticia
+     Ingreso baja (dif<0) → rojo ▼ mala noticia */
+  function difColor(r,esGasto){
+    var dif=r.dif, pct=r.pct;
+    if(Math.abs(pct)<0.05)return C.neu;
+    var sube=dif>0;
+    if(esGasto) return sube?C.dn:C.up;
+    return sube?C.up:C.dn;
+  }
+
+  function flechaDif(r){
+    if(Math.abs(r.pct)<0.05)return "=";
+    return r.dif>0?"▲":"▼";
+  }
+
+  function TblConceptos(tprops){
+    var filas=tprops.filas, esGasto=tprops.esGasto, lblA=tprops.lblA, lblB=tprops.lblB;
+    if(!filas||filas.length===0)return(
+      <div style={{color:C.sub,fontSize:12,textAlign:"center",padding:"20px 0"}}>Sin datos</div>
+    );
+    return(
+      <div style={{overflowY:"auto",flex:1}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+          <thead>
+            <tr style={{borderBottom:"1px solid "+C.br}}>
+              <th style={{textAlign:"left",padding:"5px 8px",color:C.sub,fontWeight:700,position:"sticky",top:0,background:C.card}}>Concepto</th>
+              <th style={{textAlign:"right",padding:"5px 8px",color:C.sub,fontWeight:700,position:"sticky",top:0,background:C.card}}>{lblA}</th>
+              <th style={{textAlign:"right",padding:"5px 8px",color:C.sub,fontWeight:700,position:"sticky",top:0,background:C.card}}>{lblB}</th>
+              <th style={{textAlign:"right",padding:"5px 8px",color:C.sub,fontWeight:700,position:"sticky",top:0,background:C.card}}>Dif $</th>
+              <th style={{textAlign:"right",padding:"5px 8px",color:C.sub,fontWeight:700,position:"sticky",top:0,background:C.card}}>Dif %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map(function(r,i){
+              var dc=difColor(r,esGasto);
+              var flecha=flechaDif(r);
+              /* Para Dif$: si es nuevo/desaparece mostrar el importe como referencia */
+              var difStr=r.esNuevo?"NUEVO":r.esDesap?"BAJA":fmt(Math.abs(r.dif));
+              /* Para Dif%: siempre mostrar con signo */
+              var pctStr=Math.abs(r.pct)<0.05?"=":Math.abs(r.pct).toFixed(0)+"%";
+              return(
+                <tr key={i} className="tbl-row" style={{borderBottom:"1px solid rgba(51,65,85,0.5)"}}>
+                  <td style={{padding:"5px 8px",color:C.tx,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.conc}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right",color:C.tx,fontWeight:600}}>{r.esDesap?"-":fmt(Math.abs(r.vA))}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right",color:C.sub}}>{r.esNuevo?"-":fmt(Math.abs(r.vB))}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right",color:dc,fontWeight:700,fontSize:r.esNuevo||r.esDesap?10:11}}>
+                    {flecha!=="="&&<span style={{marginRight:3}}>{flecha}</span>}{difStr}
+                  </td>
+                  <td style={{padding:"5px 8px",textAlign:"right",color:dc,fontWeight:700}}>
+                    {flecha!=="="&&<span style={{marginRight:2}}>{flecha}</span>}{pctStr}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  /* ── RENDER ── */
+  return(
+    <div style={{flex:mob?undefined:1,display:"flex",flexDirection:"column",gap:8,minHeight:mob?undefined:0}}>
+
+      {/* Barra de controles del comparativo */}
+      <div style={{flexShrink:0,background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:"6px 12px",
+        display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+
+        {/* Toggle Mes / Ano */}
+        <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid "+C.br}}>
+          {[["mes","Por Mes"],["ano","Por Ano"]].map(function(m){
+            var act=modo===m[0];
+            return(
+              <button key={m[0]} onClick={function(){setModo(m[0]);}}
+                style={{padding:"3px 12px",fontWeight:700,fontSize:11,cursor:"pointer",
+                  border:"none",backgroundColor:act?"#6366f1":"transparent",color:act?"#fff":C.sub}}>
+                {m[1]}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Selectores segun modo */}
+        {modo==="mes"&&<div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:11,color:C.sub,fontWeight:700}}>Periodo A:</span>
+          <select style={selStyle} value={pA.ano} onChange={function(e){setPA(function(p){return Object.assign({},p,{ano:+e.target.value});});}}>
+            {anosDisp.map(function(a){return <option key={a} value={a}>{a}</option>;})}
+          </select>
+          <select style={selStyle} value={pA.mes} onChange={function(e){setPA(function(p){return Object.assign({},p,{mes:+e.target.value});});}}>
+            {[1,2,3,4,5,6,7,8,9,10,11,12].map(function(m){return <option key={m} value={m}>{MNOM[m]}</option>;})}
+          </select>
+          <span style={{fontSize:11,color:C.sub,fontWeight:700,marginLeft:8}}>vs Periodo B:</span>
+          <select style={selStyle} value={pB.ano} onChange={function(e){setPB(function(p){return Object.assign({},p,{ano:+e.target.value});});}}>
+            {anosDisp.map(function(a){return <option key={a} value={a}>{a}</option>;})}
+          </select>
+          <select style={selStyle} value={pB.mes} onChange={function(e){setPB(function(p){return Object.assign({},p,{mes:+e.target.value});});}}>
+            {[1,2,3,4,5,6,7,8,9,10,11,12].map(function(m){return <option key={m} value={m}>{MNOM[m]}</option>;})}
+          </select>
+        </div>}
+
+        {modo==="ano"&&<div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:11,color:C.sub,fontWeight:700}}>Ano A:</span>
+          <select style={selStyle} value={anoA} onChange={function(e){setAnoA(+e.target.value);}}>
+            {anosDisp.map(function(a){return <option key={a} value={a}>{a}</option>;})}
+          </select>
+          <span style={{fontSize:11,color:C.sub,fontWeight:700,marginLeft:8}}>vs Ano B:</span>
+          <select style={selStyle} value={anoB} onChange={function(e){setAnoB(+e.target.value);}}>
+            {anosDisp.map(function(a){return <option key={a} value={a}>{a}</option>;})}
+          </select>
+        </div>}
+
+        {/* Fecha ultimo movimiento */}
+        <span style={{fontSize:mob?10:11,color:C.sub,whiteSpace:"nowrap"}}>
+          Actualiz.: <span style={{color:C.ac,fontWeight:700}}>{ultimaFecha||"—"}</span>
+        </span>
+        {/* Moneda */}
+        <div style={{marginLeft:"auto",display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid "+C.br}}>
+          {["ARS","USD"].map(function(m){return(
+            <button key={m} onClick={function(){setMon(m);}}
+              style={{padding:"3px 12px",fontWeight:700,fontSize:11,cursor:"pointer",
+                border:"none",backgroundColor:mon===m?C.ah:"transparent",color:mon===m?"#fff":C.sub}}>
+              {m}
+            </button>
+          );})}
+        </div>
+      </div>
+
+      {/* Contenido segun modo */}
+      {modo==="mes"&&(
+        <div style={{flex:1,display:"flex",flexDirection:"column",gap:8,minHeight:0}}>
+
+          {/* KPIs comparativos */}
+          {cargComp?(
+            <div style={{flexShrink:0,color:C.sub,fontSize:12,textAlign:"center",padding:"8px 0"}}>
+              Cargando datos del periodo...
+            </div>
+          ):(
+            <div style={{flexShrink:0,display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(6,1fr)",gap:mob?5:8}}>
+              {[
+                {label:"Ingresos "+lblPeriodo(pA),val:kpiA.ing,base:kpiB.ing,color:C.ing,tipo:"ing"},
+                {label:"Egresos "+lblPeriodo(pA),val:kpiA.eg,base:kpiB.eg,color:C.eg,tipo:"eg"},
+                {label:"Ahorro "+lblPeriodo(pA),val:kpiA.ah,base:kpiB.ah,color:kpiA.ah>=0?C.ing:C.eg,tipo:"ah"},
+                {label:"Ingresos "+lblPeriodo(pB),val:kpiB.ing,color:C.ing},
+                {label:"Egresos "+lblPeriodo(pB),val:kpiB.eg,color:C.eg},
+                {label:"Ahorro "+lblPeriodo(pB),val:kpiB.ah,color:kpiB.ah>=0?C.ing:C.eg}
+              ].map(function(k,i){
+                /* Solo las 3 primeras (periodo A) llevan indicador vs B */
+                var badge=null;
+                if(k.tipo!==undefined&&k.base!==undefined&&Math.abs(k.base)>0.5){
+                  var mA=Math.abs(k.val), mB=Math.abs(k.base);
+                  var pctV=(mA-mB)/mB*100;
+                  var sube=pctV>0;
+                  /* Color: ing/ah subio=verde, bajo=rojo | eg subio=rojo, bajo=verde */
+                  var bc=(k.tipo==="eg")?(sube?C.dn:C.up):(sube?C.up:C.dn);
+                  var flV=sube?"▲":"▼";
+                  if(Math.abs(pctV)<0.05){bc=C.neu;flV="=";}
+                  var difMonto=mA-mB;
+                  badge=<span style={{fontSize:10,fontWeight:700,color:bc,marginLeft:5}}>
+                    {flV} {Math.abs(pctV).toFixed(1)}% ({fmt(Math.abs(difMonto))})
+                  </span>;
+                }
+                return(
+                  <div key={i} style={{background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:"6px 10px"}}>
+                    <div style={{fontSize:9,color:C.sub,marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.label}</div>
+                    <div style={{fontSize:13,fontWeight:700,color:k.color,display:"flex",alignItems:"baseline",flexWrap:"wrap",gap:2}}>
+                      {fmt(Math.abs(k.val))}{badge}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Tablas + Panel IA */}
+          <div style={{flex:mob?undefined:1,display:"flex",flexDirection:mob?"column":"row",gap:8,minHeight:mob?undefined:0}}>
+
+            {/* Egresos */}
+            <div style={{flex:3,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+              padding:"10px 12px",display:"flex",flexDirection:"column",minHeight:mob?undefined:0}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.eg,marginBottom:6,flexShrink:0}}>
+                Egresos por Concepto
+                <span style={{fontSize:10,color:C.sub,fontWeight:400,marginLeft:6}}>{lblPeriodo(pA)} vs {lblPeriodo(pB)}</span>
+              </div>
+              <TblConceptos filas={gastosCmp} esGasto={true} lblA={lblPeriodo(pA)} lblB={lblPeriodo(pB)} mob={mob}/>
+            </div>
+
+            {/* Ingresos + Panel IA */}
+            <div style={{flex:2,display:"flex",flexDirection:"column",gap:8,minHeight:mob?undefined:0}}>
+              <div style={{background:C.card,border:"1px solid "+C.br,borderRadius:10,
+                padding:"10px 12px",display:"flex",flexDirection:"column",
+                flexShrink:mob?undefined:0,maxHeight:mob?undefined:"50%",minHeight:mob?undefined:0}}>
+                <div style={{fontSize:12,fontWeight:700,color:C.ing,marginBottom:6,flexShrink:0}}>
+                  Ingresos por Concepto
+                  <span style={{fontSize:10,color:C.sub,fontWeight:400,marginLeft:6}}>{lblPeriodo(pA)} vs {lblPeriodo(pB)}</span>
+                </div>
+                <TblConceptos filas={ingresosCmp} esGasto={false} lblA={lblPeriodo(pA)} lblB={lblPeriodo(pB)} mob={mob}/>
+              </div>
+              <PanelIA analisis={analisis} scroll={!mob}/>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {modo==="ano"&&(
+        <div style={{flex:mob?undefined:1,display:"flex",flexDirection:"column",gap:8,minHeight:mob?undefined:0,overflowY:mob?"visible":"auto"}}>
+
+          {/* KPIs anuales comparativos */}
+          <div style={{flexShrink:0,display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(6,1fr)",gap:mob?5:8}}>
+            {[
+              {label:"Ingresos "+anoA,val:USD?totA.ingUSD:totA.ingARS,base:USD?totB.ingUSD:totB.ingARS,color:C.ing,tipo:"ing"},
+              {label:"Egresos "+anoA,val:USD?Math.abs(totA.egUSD):Math.abs(totA.egARS),base:USD?Math.abs(totB.egUSD):Math.abs(totB.egARS),color:C.eg,tipo:"eg"},
+              {label:"Ahorro "+anoA,val:USD?totA.ahUSD:totA.ahARS,base:USD?totB.ahUSD:totB.ahARS,color:(USD?totA.ahUSD:totA.ahARS)>=0?C.ing:C.eg,tipo:"ah"},
+              {label:"Ingresos "+anoB,val:USD?totB.ingUSD:totB.ingARS,color:C.ing},
+              {label:"Egresos "+anoB,val:USD?Math.abs(totB.egUSD):Math.abs(totB.egARS),color:C.eg},
+              {label:"Ahorro "+anoB,val:USD?totB.ahUSD:totB.ahARS,color:(USD?totB.ahUSD:totB.ahARS)>=0?C.ing:C.eg}
+            ].map(function(k,i){
+              var badge=null;
+              if(k.tipo!==undefined&&k.base!==undefined&&Math.abs(k.base)>0.5){
+                var mA=Math.abs(k.val), mB=Math.abs(k.base);
+                var pctV=(mA-mB)/mB*100;
+                var sube=pctV>0;
+                var bc=(k.tipo==="eg")?(sube?C.dn:C.up):(sube?C.up:C.dn);
+                var flV=sube?"▲":"▼";
+                if(Math.abs(pctV)<0.05){bc=C.neu;flV="=";}
+                badge=<span style={{fontSize:10,fontWeight:700,color:bc,marginLeft:5}}>
+                  {flV} {Math.abs(pctV).toFixed(1)}%
+                </span>;
+              }
+              return(
+                <div key={i} style={{background:C.card,border:"1px solid "+C.br,borderRadius:8,padding:"6px 10px"}}>
+                  <div style={{fontSize:9,color:C.sub,marginBottom:2}}>{k.label}</div>
+                  <div style={{fontSize:13,fontWeight:700,color:k.color,display:"flex",alignItems:"baseline",flexWrap:"wrap",gap:2}}>
+                    {fmt(Math.abs(k.val))}{badge}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Grafico barras ano A vs ano B por mes */}
+          <GrafComparativoAnual resumen={resumen} anoA={anoA} anoB={anoB} USD={USD}/>
+
+          {/* Resumen IA */}
+          <PanelIA analisis={analisis}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Grafico comparativo mensual de dos anos */
+function GrafComparativoAnual(props){
+  var resumen=props.resumen,anoA=props.anoA,anoB=props.anoB,USD=props.USD;
+  var datos=useMemo(function(){
+    var meses=[1,2,3,4,5,6,7,8,9,10,11,12];
+    return meses.map(function(m){
+      var rA=resumen.find(function(r){return r.ano===anoA&&r.mes===m;});
+      var rB=resumen.find(function(r){return r.ano===anoB&&r.mes===m;});
+      return{
+        mes:MNOM[m],
+        ingA:rA?(USD?rA.ingUSD:rA.ingARS):null,
+        egA:rA?(USD?Math.abs(rA.egUSD):Math.abs(rA.egARS)):null,
+        ingB:rB?(USD?rB.ingUSD:rB.ingARS):null,
+        egB:rB?(USD?Math.abs(rB.egUSD):Math.abs(rB.egARS)):null
+      };
+    }).filter(function(d){return d.ingA!==null||d.ingB!==null;});
+  },[resumen,anoA,anoB,USD]);
+
+  if(!datos||datos.length===0)return null;
+
+  function TipCmp(p){
+    if(!p.active||!p.payload||!p.payload.length)return null;
+    var fmt=USD?fUSD:fARS;
+    return(
+      <div style={{background:"#1e2d3d",border:"1px solid "+C.br,borderRadius:8,
+        padding:"10px 14px",fontSize:11,boxShadow:"0 4px 16px rgba(0,0,0,0.6)"}}>
+        <div style={{fontWeight:800,color:C.tx,marginBottom:6}}>{p.label}</div>
+        {p.payload.map(function(e,i){
+          return e.value!==null&&<div key={i} style={{color:e.color,fontWeight:600,marginBottom:2}}>{e.name}: {fmt(e.value)}</div>;
+        })}
+      </div>
+    );
+  }
+
+  return(
+    <div style={{flexShrink:0,background:C.card,border:"1px solid "+C.br,borderRadius:10,
+      padding:"12px 14px",height:280}}>
+      <div style={{fontSize:12,fontWeight:700,color:C.tx,marginBottom:8}}>
+        Ingresos y Egresos mensuales: {anoA} vs {anoB}
+      </div>
+      <div style={{height:230}}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={datos} margin={{top:4,right:20,bottom:4,left:20}}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.br}/>
+            <XAxis dataKey="mes" tick={{fill:C.tx,fontSize:11}} tickLine={false}/>
+            <YAxis tick={{fill:C.sub,fontSize:10}} tickFormatter={function(v){return fK(v,USD);}} width={60}/>
+            <Tooltip content={<TipCmp/>}/>
+            <Legend wrapperStyle={{color:C.sub,fontSize:11,paddingTop:4}}/>
+            <Bar dataKey="ingA" name={"Ing "+anoA} fill={C.ing} opacity={0.9} radius={[3,3,0,0]} barSize={14}/>
+            <Bar dataKey="egA"  name={"Eg "+anoA}  fill={C.eg}  opacity={0.9} radius={[3,3,0,0]} barSize={14}/>
+            <Bar dataKey="ingB" name={"Ing "+anoB} fill="#34d399" opacity={0.7} radius={[3,3,0,0]} barSize={14}/>
+            <Bar dataKey="egB"  name={"Eg "+anoB}  fill="#fca5a5" opacity={0.7} radius={[3,3,0,0]} barSize={14}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+/* Panel de Resumen IA */
+function PanelIA(props){
+  var a=props.analisis, scroll=props.scroll;
+  if(!a)return null;
+
+  /* Fila compacta de items con icono */
+  function ItemFila(p){
+    return(
+      <div style={{display:"flex",alignItems:"baseline",gap:4,marginBottom:2,fontSize:10}}>
+        <span style={{color:p.col,fontWeight:700,flexShrink:0}}>{p.icono}</span>
+        <span style={{color:C.tx}}>{p.conc}</span>
+        <span style={{color:C.sub,whiteSpace:"nowrap"}}>{p.detalle}</span>
+      </div>
+    );
+  }
+
+  var hayVerde=(a.ingSubieron&&a.ingSubieron.length>0)||(a.egBajaron&&a.egBajaron.length>0);
+  var hayRojo=(a.ingBajaron&&a.ingBajaron.length>0)||(a.egSubieron&&a.egSubieron.length>0);
+  var hayNuevos=(a.nuevosA&&a.nuevosA.length>0)||(a.nuevosB&&a.nuevosB.length>0);
+
+  var contenido=(
+    <div>
+      {/* 1) Conclusion general */}
+      <div style={{fontSize:11,color:C.tx,lineHeight:1.5,marginBottom:8,
+        background:"rgba(99,102,241,0.1)",borderRadius:6,padding:"6px 8px"}}>
+        {a.conclusion}
+      </div>
+
+      {/* 2) Aspectos relevantes */}
+      {a.otros&&a.otros.length>0&&(
+        <div style={{marginBottom:7}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.sub,marginBottom:3,textTransform:"uppercase",letterSpacing:"0.5px"}}>Aspectos relevantes</div>
+          {a.otros.map(function(t,i){
+            return <div key={i} style={{fontSize:10,color:C.sub,marginBottom:2}}>&#8226; {t}</div>;
+          })}
+          {hayNuevos&&(
+            <div>
+              {a.nuevosA&&a.nuevosA.map(function(x,i){
+                return <div key={"nA"+i} style={{fontSize:10,color:C.sub,marginBottom:2}}>&#8226; Nuevo en A: {x.conc} ({x.tipo})</div>;
+              })}
+              {a.nuevosB&&a.nuevosB.map(function(x,i){
+                return <div key={"nB"+i} style={{fontSize:10,color:C.sub,marginBottom:2}}>&#8226; Solo en B: {x.conc} ({x.tipo})</div>;
+              })}
+            </div>
+          )}
+        </div>
+      )}
+      {!a.otros&&hayNuevos&&(
+        <div style={{marginBottom:7}}>
+          {a.nuevosA&&a.nuevosA.map(function(x,i){
+            return <div key={"nA"+i} style={{fontSize:10,color:C.sub,marginBottom:2}}>&#8226; Nuevo en A: {x.conc} ({x.tipo})</div>;
+          })}
+          {a.nuevosB&&a.nuevosB.map(function(x,i){
+            return <div key={"nB"+i} style={{fontSize:10,color:C.sub,marginBottom:2}}>&#8226; Solo en B: {x.conc} ({x.tipo})</div>;
+          })}
+        </div>
+      )}
+
+      {/* 3) Verde: ingresos que subieron + gastos que bajaron */}
+      {hayVerde&&(
+        <div style={{marginBottom:6}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.ing,marginBottom:3,textTransform:"uppercase",letterSpacing:"0.5px"}}>&#x2714; Buenas noticias</div>
+          {a.ingSubieron&&a.ingSubieron.map(function(x,i){
+            return <ItemFila key={"is"+i} icono="▲" col={C.ing} conc={x.conc} detalle={"Ing +"+x.pct.toFixed(0)+"%"}/>;
+          })}
+          {a.egBajaron&&a.egBajaron.map(function(x,i){
+            return <ItemFila key={"eb"+i} icono="▼" col={C.ing} conc={x.conc} detalle={"Gto "+x.pct.toFixed(0)+"%"}/>;
+          })}
+        </div>
+      )}
+
+      {/* 4) Rojo: ingresos que bajaron + gastos que subieron */}
+      {hayRojo&&(
+        <div>
+          <div style={{fontSize:10,fontWeight:700,color:C.eg,marginBottom:3,textTransform:"uppercase",letterSpacing:"0.5px"}}>&#x26A0; Atencion</div>
+          {a.ingBajaron&&a.ingBajaron.map(function(x,i){
+            return <ItemFila key={"ib"+i} icono="▼" col={C.eg} conc={x.conc} detalle={"Ing "+x.pct.toFixed(0)+"%"}/>;
+          })}
+          {a.egSubieron&&a.egSubieron.map(function(x,i){
+            return <ItemFila key={"es"+i} icono="▲" col={C.eg} conc={x.conc} detalle={"Gto +"+x.pct.toFixed(0)+"%"}/>;
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  return(
+    <div style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.25)",
+      borderRadius:8,padding:"8px 10px",display:"flex",flexDirection:"column",
+      overflow:scroll?"hidden":"visible",flex:scroll?1:undefined,minHeight:scroll?0:undefined}}>
+      <div style={{fontSize:10,fontWeight:800,color:"#a5b4fc",marginBottom:6,flexShrink:0,
+        display:"flex",alignItems:"center",gap:4}}>
+        <span>&#129504;</span> Resumen IA
+      </div>
+      {scroll?(
+        <div style={{overflowY:"auto",flex:1}}>
+          {contenido}
+        </div>
+      ):contenido}
+    </div>
+  );
+}
+
+/* ── LOGICA DE ANALISIS IA ── */
+
+function generarAnalisisMes(tabla,pA,pB,USD){
+  if(!tabla||tabla.length===0)return null;
+  var fmt=USD?fUSD:fARS;
+
+  var conDatos=tabla.filter(function(r){return r.vA!==0||r.vB!==0;});
+  var nuevosA=conDatos.filter(function(r){return r.vB===0&&r.vA!==0;});
+  var nuevosB=conDatos.filter(function(r){return r.vA===0&&r.vB!==0;});
+  var comunes=conDatos.filter(function(r){return r.vA!==0&&r.vB!==0&&r.pct!==null;});
+
+  /* Totales por tipo */
+  var totIngA=conDatos.filter(function(r){return r.tipo==="Ingreso";}).reduce(function(s,r){return s+Math.abs(r.vA);},0);
+  var totEgA=conDatos.filter(function(r){return r.tipo==="Gasto";}).reduce(function(s,r){return s+Math.abs(r.vA);},0);
+  var totIngB=conDatos.filter(function(r){return r.tipo==="Ingreso";}).reduce(function(s,r){return s+Math.abs(r.vB);},0);
+  var totEgB=conDatos.filter(function(r){return r.tipo==="Gasto";}).reduce(function(s,r){return s+Math.abs(r.vB);},0);
+  var ahA=totIngA-totEgA, ahB=totIngB-totEgB;
+  var pctAhA=totIngA>0?ahA/totIngA*100:0;
+  var pctAhB=totIngB>0?ahB/totIngB*100:0;
+  var lblA=MNOM[pA.mes]+" "+pA.ano, lblB=MNOM[pB.mes]+" "+pB.ano;
+
+  var difIng=totIngA-totIngB;
+  var difEg=totEgA-totEgB;
+
+  var otros=[];
+  if(Math.abs(difIng)>100){
+    otros.push("Los ingresos de "+lblA+(difIng>0?" fueron "+fmt(difIng)+" mayores":" fueron "+fmt(Math.abs(difIng))+" menores")+" que en "+lblB+".");
+  }
+  if(Math.abs(difEg)>100){
+    otros.push("Los egresos de "+lblA+(difEg>0?" fueron "+fmt(difEg)+" mayores":" fueron "+fmt(Math.abs(difEg))+" menores")+" que en "+lblB+".");
+  }
+  if(nuevosA.length>0){
+    otros.push("En "+lblA+" aparecen "+nuevosA.length+" concepto"+(nuevosA.length>1?"s":"")+" que no existian en "+lblB+".");
+  }
+  if(nuevosB.length>0){
+    otros.push("En "+lblB+" habia "+nuevosB.length+" concepto"+(nuevosB.length>1?"s":"")+" que no aparece"+(nuevosB.length>1?"n":"")+" en "+lblA+".");
+  }
+
+  /* Conclusion */
+  var mejoro=ahA>ahB;
+  var difAh=Math.abs(ahA-ahB);
+  var conclusion="";
+  if(Math.abs(ahA-ahB)<100){
+    conclusion="Los resultados de "+lblA+" y "+lblB+" son practicamente equivalentes, con ahorro similar en ambos periodos.";
+  } else if(mejoro){
+    conclusion=lblA+" fue mejor que "+lblB+": ahorro mayor en "+fmt(difAh)+" ("+pctAhA.toFixed(1)+"% vs "+pctAhB.toFixed(1)+"%). "+(difIng>0?"Ingresos subieron.":"Egresos bajaron.");
+  } else {
+    conclusion=lblA+" fue menos favorable que "+lblB+": ahorro menor en "+fmt(difAh)+" ("+pctAhA.toFixed(1)+"% vs "+pctAhB.toFixed(1)+"%). "+(difIng<0?"Ingresos bajaron.":"Egresos subieron.");
+  }
+
+  /* Listas para semaforo verde/rojo:
+     VERDE: ingresos que subieron (pct>5, tipo Ingreso) + gastos que bajaron (pct<-5, tipo Gasto)
+     ROJO:  ingresos que bajaron (pct<-5, tipo Ingreso) + gastos que subieron (pct>5, tipo Gasto) */
+  var ingSubieron=comunes.filter(function(r){return r.tipo==="Ingreso"&&r.pct>5;})
+    .sort(function(a,b){return b.pct-a.pct;}).slice(0,4);
+  var egBajaron=comunes.filter(function(r){return r.tipo==="Gasto"&&r.pct<-5;})
+    .sort(function(a,b){return a.pct-b.pct;}).slice(0,4);
+  var ingBajaron=comunes.filter(function(r){return r.tipo==="Ingreso"&&r.pct<-5;})
+    .sort(function(a,b){return a.pct-b.pct;}).slice(0,4);
+  var egSubieron=comunes.filter(function(r){return r.tipo==="Gasto"&&r.pct>5;})
+    .sort(function(a,b){return b.pct-a.pct;}).slice(0,4);
+
+  return{ingSubieron:ingSubieron,egBajaron:egBajaron,ingBajaron:ingBajaron,egSubieron:egSubieron,
+    nuevosA:nuevosA,nuevosB:nuevosB,otros:otros,conclusion:conclusion};
+}
+
+function generarAnalisisAno(resA,resB,anoA,anoB,USD){
+  if(!resA||resA.length===0)return null;
+  var fmt=USD?fUSD:fARS;
+
+  function totAnio(res){
+    return res.reduce(function(acc,r){
+      return{
+        ing:acc.ing+(USD?r.ingUSD:r.ingARS),
+        eg:acc.eg+(USD?Math.abs(r.egUSD):Math.abs(r.egARS)),
+        ah:acc.ah+(USD?r.ahUSD:r.ahARS)
+      };
+    },{ing:0,eg:0,ah:0});
+  }
+
+  var tA=totAnio(resA), tB=totAnio(resB);
+  var mejoro=tA.ah>tB.ah;
+  var difAh=Math.abs(tA.ah-tB.ah);
+  var difIng=tA.ing-tB.ing;
+  var difEg=tA.eg-tB.eg;
+  var pctAhA=tA.ing>0?tA.ah/tA.ing*100:0;
+  var pctAhB=tB.ing>0?tB.ah/tB.ing*100:0;
+
+  var otros=[];
+  if(Math.abs(difIng)>100) otros.push("Los ingresos de "+anoA+(difIng>0?" superaron":" fueron menores")+" a los de "+anoB+" en "+fmt(Math.abs(difIng))+".");
+  if(Math.abs(difEg)>100) otros.push("Los egresos de "+anoA+(difEg>0?" fueron mayores":" fueron menores")+" que en "+anoB+" en "+fmt(Math.abs(difEg))+".");
+  if(resA.length!==resB.length) otros.push("El ano "+anoA+" tiene "+resA.length+" meses registrados y "+anoB+" tiene "+resB.length+" meses (comparacion parcial).");
+
+  var conclusion="";
+  if(Math.abs(tA.ah-tB.ah)<100){
+    conclusion="El desempeno financiero de "+anoA+" y "+anoB+" es practicamente equivalente en terminos de ahorro neto.";
+  } else if(mejoro){
+    conclusion="El ano "+anoA+" fue financieramente mejor que "+anoB+": el ahorro neto fue superior en "+fmt(difAh)+" ("+pctAhA.toFixed(1)+"% vs "+pctAhB.toFixed(1)+"% de tasa de ahorro anual).";
+  } else {
+    conclusion="El ano "+anoA+" fue financieramente inferior a "+anoB+": el ahorro neto fue menor en "+fmt(difAh)+" ("+pctAhA.toFixed(1)+"% vs "+pctAhB.toFixed(1)+"% de tasa de ahorro anual).";
+  }
+
+  return{ingSubieron:[],egBajaron:[],ingBajaron:[],egSubieron:[],nuevosA:[],nuevosB:[],otros:otros,conclusion:conclusion};
+}
+
+window.ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
