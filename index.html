@@ -103,6 +103,7 @@ function App(){
   var [cargando,setCarg]=useState(true);
   var [error,setError]=useState(null);
   var [resumen,setResumen]=useState([]);
+  var [ultimaFecha,setUltimaFecha]=useState(null);
   var [concMes,setConcMes]=useState([]);
   var [mon,setMon]=useState("ARS");
   var [filtAno,setFiltAno]=useState(anoActual);
@@ -120,7 +121,17 @@ function App(){
   function cargarResumen(){
     setCarg(true);setError(null);clearCache();
     fetchProxy({req:"resumen"})
-      .then(function(r){setResumen(r);setCarg(false);})
+      .then(function(r){
+        /* El proxy devuelve {meses:[...], ultimaFecha:"DD/MM/YYYY HH:MM"}
+           Compatibilidad hacia atras: si r es array (version vieja del proxy), usarlo directo */
+        if(Array.isArray(r)){
+          setResumen(r);
+        } else {
+          setResumen(r.meses||[]);
+          setUltimaFecha(r.ultimaFecha||null);
+        }
+        setCarg(false);
+      })
       .catch(function(e){setError(e.message);setCarg(false);});
   }
 
@@ -284,10 +295,18 @@ function App(){
             );
           })}
         </div>
-        {!mob&&<span style={{marginLeft:"auto",fontSize:11,color:error?C.eg:C.ing,whiteSpace:"nowrap"}}>
-          {error?"Error: "+error:"Conectado a Google Sheets"}
+        {!mob&&<span style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10,whiteSpace:"nowrap"}}>
+          <span style={{fontSize:11,color:error?C.eg:C.ing}}>
+            {error?"Error: "+error:"Conectado a Google Sheets"}
+          </span>
+          {ultimaFecha&&<span style={{fontSize:11,color:C.sub}}>
+            Ultimo mov.: <span style={{color:C.ac,fontWeight:700}}>{ultimaFecha}</span>
+          </span>}
         </span>}
-        {mob&&error&&<span style={{fontSize:10,color:C.eg}}>{"Error: "+error}</span>}
+        {mob&&<span style={{fontSize:10,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          {error&&<span style={{color:C.eg}}>{"Error: "+error}</span>}
+          {ultimaFecha&&!error&&<span style={{color:C.sub}}>Mov.: <span style={{color:C.ac,fontWeight:700}}>{ultimaFecha}</span></span>}
+        </span>}
       </div>
 
       {/* Filtros - solo para resumen y evolucion */}
