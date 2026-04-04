@@ -126,6 +126,7 @@ function App(){
            Compatibilidad hacia atras: si r es array (version vieja del proxy), usarlo directo */
         if(Array.isArray(r)){
           setResumen(r);
+          setUltimaFecha(null); /* proxy viejo no envia fecha — se mostrara N/D */
         } else {
           setResumen(r.meses||[]);
           setUltimaFecha(r.ultimaFecha||null);
@@ -295,18 +296,12 @@ function App(){
             );
           })}
         </div>
-        {!mob&&<span style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10,whiteSpace:"nowrap"}}>
-          <span style={{fontSize:11,color:error?C.eg:C.ing}}>
+        <span style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10,whiteSpace:"nowrap"}}>
+          {!mob&&<span style={{fontSize:11,color:error?C.eg:C.ing}}>
             {error?"Error: "+error:"Conectado a Google Sheets"}
-          </span>
-          {ultimaFecha&&<span style={{fontSize:11,color:C.sub}}>
-            Ultimo mov.: <span style={{color:C.ac,fontWeight:700}}>{ultimaFecha}</span>
           </span>}
-        </span>}
-        {mob&&<span style={{fontSize:10,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-          {error&&<span style={{color:C.eg}}>{"Error: "+error}</span>}
-          {ultimaFecha&&!error&&<span style={{color:C.sub}}>Mov.: <span style={{color:C.ac,fontWeight:700}}>{ultimaFecha}</span></span>}
-        </span>}
+          {mob&&error&&<span style={{fontSize:10,color:C.eg}}>{error}</span>}
+        </span>
       </div>
 
       {/* Filtros - solo para resumen y evolucion */}
@@ -425,6 +420,13 @@ function App(){
             </button>
           );})}
         </div>
+        {/* Fecha ultimo movimiento — siempre visible en la barra de filtros */}
+        <span style={{fontSize:mob?10:11,color:C.sub,whiteSpace:"nowrap",
+          borderLeft:"1px solid "+C.br,paddingLeft:mob?6:10,marginLeft:mob?0:4}}>
+          Actualiz.: <span style={{color:C.ac,fontWeight:700}}>
+            {ultimaFecha||"—"}
+          </span>
+        </span>
         <button onClick={function(){cargarResumen();}}
           style={{backgroundColor:"transparent",border:"1px solid "+C.br,color:C.sub,
             borderRadius:6,padding:"3px 10px",fontSize:11,cursor:"pointer"}}>
@@ -537,7 +539,7 @@ function App(){
       {topBar}
       {tab==="resumen"&&vistaResumen}
       {tab==="evolucion"&&<GrafEvolucion resumen={resumen} filtAno={filtAno} USD={USD} mob={mob}/>}
-      {tab==="comparativo"&&<Comparativo resumen={resumen} anosDisp={anosDisp} USD={USD} mon={mon} setMon={setMon} onRecargar={cargarResumen} mob={mob}/>}
+      {tab==="comparativo"&&<Comparativo resumen={resumen} anosDisp={anosDisp} USD={USD} mon={mon} setMon={setMon} onRecargar={cargarResumen} mob={mob} ultimaFecha={ultimaFecha}/>}
     </div>
   );
 }
@@ -1044,7 +1046,7 @@ function GrafEvolucion(props){
    COMPARATIVO
    ================================================================ */
 function Comparativo(props){
-  var resumen=props.resumen, anosDisp=props.anosDisp, USD=props.USD, mon=props.mon, setMon=props.setMon, mob=props.mob;
+  var resumen=props.resumen, anosDisp=props.anosDisp, USD=props.USD, mon=props.mon, setMon=props.setMon, mob=props.mob, ultimaFecha=props.ultimaFecha;
   var hoy=new Date();
   var anoActual=hoy.getFullYear();
   var mesActual=hoy.getMonth()+1;
@@ -1298,6 +1300,10 @@ function Comparativo(props){
           </select>
         </div>}
 
+        {/* Fecha ultimo movimiento */}
+        <span style={{fontSize:mob?10:11,color:C.sub,whiteSpace:"nowrap"}}>
+          Actualiz.: <span style={{color:C.ac,fontWeight:700}}>{ultimaFecha||"—"}</span>
+        </span>
         {/* Moneda */}
         <div style={{marginLeft:"auto",display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid "+C.br}}>
           {["ARS","USD"].map(function(m){return(
